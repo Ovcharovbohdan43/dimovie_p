@@ -13,7 +13,14 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  const { supabaseUrl, supabaseKey } = getSupabaseBrowserKey();
+  let supabaseUrl: string;
+  let supabaseKey: string;
+  try {
+    ({ supabaseUrl, supabaseKey } = getSupabaseBrowserKey());
+  } catch {
+    // Allow the site to boot on Railway even if Supabase envs are missing
+    return supabaseResponse;
+  }
 
   const supabase = createServerClient(supabaseUrl, supabaseKey, {
     cookies: {
