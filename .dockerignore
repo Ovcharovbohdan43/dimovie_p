@@ -13,9 +13,9 @@ coverage
 *.log
 .DS_Store
 Thumbs.db
-apps/web
+apps/api/test
+apps/api/coverage
+apps/api/dist
 docs
 **/*.md
 !**/.env.example
-apps/api/test
-apps/api/coverage
