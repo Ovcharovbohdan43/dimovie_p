@@ -6,7 +6,7 @@
     "dev": "next dev --webpack -H 127.0.0.1",
     "ensure:css-native": "node ./scripts/ensure-css-native.mjs",
     "build": "npm run ensure:css-native && next build --webpack",
-    "start": "next start --hostname 0.0.0.0 --port ${PORT:-3000}",
+    "start": "next start --hostname 0.0.0.0",
     "lint": "eslint"
   },
   "dependencies": {
