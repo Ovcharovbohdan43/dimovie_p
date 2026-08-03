@@ -1,0 +1,218 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SubscriptionTier {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum RoomStatus {
+  ACTIVE
+  CLOSED
+  ARCHIVED
+}
+
+enum RoomPrivacy {
+  PUBLIC
+  PRIVATE
+  PASSWORD
+}
+
+enum VideoSourceType {
+  EMBED
+  UPLOAD
+}
+
+enum ParticipantRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum OAuthProvider {
+  GOOGLE
+  DISCORD
+}
+
+model User {
+  id                   String           @id @default(cuid())
+  email                String           @unique
+  passwordHash         String?          @map("password_hash")
+  displayName          String           @map("display_name")
+  avatarUrl            String?          @map("avatar_url")
+  bio                  String?
+  createdAt            DateTime         @default(now()) @map("created_at")
+  subscription         SubscriptionTier @default(FREE)
+  stripeCustomerId     String?          @unique @map("stripe_customer_id")
+  stripeSubscriptionId String?          @map("stripe_subscription_id")
+  subscriptionEndsAt   DateTime?        @map("subscription_ends_at")
+  oauthProvider        OAuthProvider?   @map("oauth_provider")
+  oauthId              String?          @map("oauth_id")
+  refreshTokens        RefreshToken[]
+  ownedRooms           Room[]           @relation("RoomOwner")
+  participants         Participant[]
+  messages             Message[]
+  watchHistory         WatchHistory[]
+  roomBans             RoomBan[]        @relation("BannedUser")
+  bansIssued           RoomBan[]        @relation("BanIssuer")
+  hostBansReceived     HostBan[]        @relation("HostBanTarget")
+  hostBansIssued       HostBan[]        @relation("HostBanIssuer")
+
+  @@unique([oauthProvider, oauthId])
+  @@map("users")
+}
+
+model WatchHistory {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roomId    String?  @map("room_id")
+  title     String
+  thumbnail String?
+  videoUrl  String?  @map("video_url")
+  watchedAt DateTime @default(now()) @map("watched_at")
+  duration  Int      @default(0)
+
+  @@index([userId, watchedAt])
+  @@map("watch_history")
+}
+
+model RoomBan {
+  id        String   @id @default(cuid())
+  roomId    String   @map("room_id")
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId    String   @map("user_id")
+  user      User     @relation("BannedUser", fields: [userId], references: [id])
+  bannedBy  String   @map("banned_by")
+  issuer    User     @relation("BanIssuer", fields: [bannedBy], references: [id])
+  reason    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@map("room_bans")
+}
+
+model HostBan {
+  id        String   @id @default(cuid())
+  hostId    String   @map("host_id")
+  host      User     @relation("HostBanIssuer", fields: [hostId], references: [id], onDelete: Cascade)
+  userId    String   @map("user_id")
+  user      User     @relation("HostBanTarget", fields: [userId], references: [id], onDelete: Cascade)
+  reason    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([hostId, userId])
+  @@index([hostId])
+  @@map("host_bans")
+}
+
+model RoomSession {
+  id               String    @id @default(cuid())
+  roomId           String    @map("room_id")
+  room             Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  startedAt        DateTime  @default(now()) @map("started_at")
+  endedAt          DateTime? @map("ended_at")
+  peakParticipants Int       @default(0) @map("peak_participants")
+  totalMessages    Int       @default(0) @map("total_messages")
+  totalReactions   Int       @default(0) @map("total_reactions")
+
+  @@index([roomId, startedAt])
+  @@map("room_sessions")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @map("token_hash")
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Room {
+  id            String          @id @default(cuid())
+  roomCode      String          @unique @map("room_code")
+  ownerId       String          @map("owner_id")
+  owner         User            @relation("RoomOwner", fields: [ownerId], references: [id])
+  createdAt     DateTime        @default(now()) @map("created_at")
+  status        RoomStatus      @default(ACTIVE)
+  privacy       RoomPrivacy     @default(PUBLIC)
+  passwordHash  String?         @map("password_hash")
+  maxUsers      Int             @default(100) @map("max_users")
+  description   String?         @db.VarChar(500)
+  rules         String?         @db.VarChar(1000)
+  videoSource   VideoSource?
+  participants  Participant[]
+  messages      Message[]
+  playbackState PlaybackState?
+  bans          RoomBan[]
+  sessions      RoomSession[]
+  branding      Json?           @map("branding")
+
+  @@index([ownerId])
+  @@map("rooms")
+}
+
+model VideoSource {
+  id       String          @id @default(cuid())
+  roomId   String          @unique @map("room_id")
+  room     Room            @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  type     VideoSourceType
+  url      String
+  metadata Json?
+
+  @@map("video_sources")
+}
+
+model Participant {
+  id       String          @id @default(cuid())
+  roomId   String          @map("room_id")
+  room     Room            @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId   String          @map("user_id")
+  user     User            @relation(fields: [userId], references: [id])
+  joinedAt DateTime        @default(now()) @map("joined_at")
+  role     ParticipantRole @default(MEMBER)
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@map("participants")
+}
+
+model PlaybackState {
+  id           String   @id @default(cuid())
+  roomId       String   @unique @map("room_id")
+  room         Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  isPlaying    Boolean  @default(false) @map("is_playing")
+  currentTime  Float    @default(0) @map("current_time")
+  playbackRate Float    @default(1) @map("playback_rate")
+  lastEventAt  DateTime @default(now()) @map("last_event_at")
+  lastEventBy  String?  @map("last_event_by")
+  version      Int      @default(0)
+
+  @@map("playback_states")
+}
+
+model Message {
+  id        String    @id @default(cuid())
+  roomId    String    @map("room_id")
+  room      Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id])
+  content   String
+  createdAt DateTime  @default(now()) @map("created_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([roomId, createdAt])
+  @@map("messages")
+}

@@ -1,0 +1,1028 @@
+"use client";
+
+
+
+import { use, useState, useCallback, useEffect, useRef } from "react";
+
+import { useRouter } from "next/navigation";
+
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+
+import {
+  Film,
+  MessageCircle,
+} from "lucide-react";
+
+import type {
+
+  RoomSummary,
+
+  RoomPreview,
+
+  SyncStatePayload,
+
+  ChatMessagePayload,
+
+  RoomParticipant,
+
+} from "@dimovie/shared";
+
+import { api, getToken, publicApi } from "@/lib/api";
+
+import { useAuth } from "@/hooks/use-auth";
+
+import { useRoomSocket } from "@/hooks/use-room-socket";
+
+import { LoadingScreen, LoadingSpinner } from "@/components/ui/loading-spinner";
+import { SyncVideoPlayer } from "@/components/room/sync-video-player";
+import { ChatPanel } from "@/components/room/chat-panel";
+import { RoomHeader } from "@/components/room/room-header";
+import { RoomDetails } from "@/components/room/room-details";
+
+import { Button } from "@/components/ui/button";
+
+import { Input } from "@/components/ui/input";
+
+import { Label } from "@/components/ui/label";
+
+import { parseVideoUrl, getPlayableStreamUrl } from "@/lib/video-url";
+
+import { getVideoPreview, canControlPlayback } from "@dimovie/shared";
+
+import { RoomPasswordForm } from "@/components/room/room-password-form";
+
+import { RoomCatalogSetup } from "@/components/room/room-catalog-setup";
+
+import { HostCatalogControls } from "@/components/room/host-catalog-controls";
+import { RoomAnalyticsPanel } from "@/components/room/room-analytics-panel";
+import { RoomBrandingForm } from "@/components/room/room-branding-form";
+import { VoiceControls } from "@/components/room/voice-controls";
+import { useVoiceChat } from "@/hooks/use-voice-chat";
+import {
+  PlayerLiveOverlay,
+  type LiveComment,
+  type LiveReaction,
+} from "@/components/room/player-live-overlay";
+
+import { RoomGuestAuthModal } from "@/components/room/room-guest-auth-modal";
+
+import { RoomPreviewTheater } from "@/components/room/room-preview-theater";
+
+
+
+function applyRoomVideo(
+
+  room: RoomSummary | undefined,
+
+  setVideoUrl: (url: string) => void,
+
+  setShowSetup: (v: boolean) => void,
+
+  isOwner: boolean,
+
+) {
+
+  if (room?.videoSource?.url) {
+
+    setVideoUrl(getPlayableStreamUrl(room));
+
+    setShowSetup(false);
+
+  } else if (room && isOwner) {
+
+    setShowSetup(true);
+
+  }
+
+}
+
+
+
+export default function RoomPage({
+
+  params,
+
+}: {
+
+  params: Promise<{ code: string }>;
+
+}) {
+
+  const { code } = use(params);
+
+  const router = useRouter();
+
+  const { me, authReady, hasToken, isAuthenticated } = useAuth();
+
+  const [syncState, setSyncState] = useState<SyncStatePayload | null>(null);
+
+  const [messages, setMessages] = useState<ChatMessagePayload[]>([]);
+
+  const [participants, setParticipants] = useState<RoomParticipant[]>([]);
+
+  const [videoUrl, setVideoUrl] = useState("");
+
+  const [setupUrl, setSetupUrl] = useState("");
+
+  const [showSetup, setShowSetup] = useState(false);
+
+  const [hasJoined, setHasJoined] = useState(false);
+
+  const [joinError, setJoinError] = useState<string | null>(null);
+
+  const [reactions, setReactions] = useState<LiveReaction[]>([]);
+
+  const [playerComments, setPlayerComments] = useState<LiveComment[]>([]);
+
+  const reactionLaneRef = useRef(0);
+
+  const [chatOpen, setChatOpen] = useState(false);
+
+  const [broadcastEnded, setBroadcastEnded] = useState(false);
+
+  const [endedMessage, setEndedMessage] = useState("The host ended the stream");
+
+
+
+  const token = typeof window !== "undefined" ? getToken() ?? "" : "";
+
+
+
+  const queryClient = useQueryClient();
+
+
+
+  const preview = useQuery({
+
+    queryKey: ["room", code, "preview"],
+
+    queryFn: () => publicApi<RoomPreview>(`/rooms/${code}/preview`),
+
+    staleTime: 30_000,
+
+  });
+
+
+
+  const room = useQuery({
+
+    queryKey: ["room", code],
+
+    queryFn: () => api<RoomSummary>(`/rooms/${code}`),
+
+    enabled: isAuthenticated,
+
+    refetchInterval: (query) => {
+
+      const data = query.state.data;
+
+      const catalog =
+
+        (data?.videoSource?.metadata as { provider?: string } | undefined)
+
+          ?.provider === "rezka";
+
+      if (!videoUrl) return 5000;
+
+      if (catalog) return 8000;
+
+      return false;
+
+    },
+
+  });
+
+
+
+  const joinRoom = useMutation({
+
+    mutationFn: (password?: string) =>
+
+      api<RoomSummary>(`/rooms/${code}/join`, {
+
+        method: "POST",
+
+        body: JSON.stringify(password ? { password } : {}),
+
+      }),
+
+    onSuccess: (data) => {
+
+      setHasJoined(true);
+
+      setJoinError(null);
+
+      applyRoomVideo(data, setVideoUrl, setShowSetup, me.data?.id === data.owner.id);
+
+    },
+
+    onError: (err: Error) => {
+
+      setJoinError(err.message);
+
+    },
+
+  });
+
+
+
+  const closeRoom = useMutation({
+
+    mutationFn: () =>
+
+      api<{ success: boolean }>(`/rooms/${room.data!.id}/close`, {
+
+        method: "POST",
+
+      }),
+
+    onSuccess: () => {
+
+      router.push("/dashboard");
+
+    },
+
+  });
+
+
+
+  const setVideo = useMutation({
+
+    mutationFn: (url: string) => {
+
+      const parsed = parseVideoUrl(url);
+
+      if (parsed.provider === "rezka") {
+
+        throw new Error(
+          "For these links, use the \"Your resource link\" section below",
+        );
+
+      }
+
+      const videoPreview = getVideoPreview(url);
+
+      return api<RoomSummary>(`/rooms/${room.data!.id}/video`, {
+
+        method: "POST",
+
+        body: JSON.stringify({
+
+          type: "EMBED",
+
+          url: parsed.originalUrl,
+
+          metadata: {
+
+            title: "Watch Party",
+
+            provider: parsed.provider,
+
+            embedUrl: parsed.embedUrl,
+
+            videoId: parsed.videoId,
+
+            thumbnail: videoPreview.thumbnailUrl,
+
+          },
+
+        }),
+
+      });
+
+    },
+
+    onSuccess: (data) => {
+
+      queryClient.setQueryData(["room", code], data);
+
+      setVideoUrl(getPlayableStreamUrl(data));
+
+      setShowSetup(false);
+
+    },
+
+  });
+
+
+
+  const handleCatalogUpdated = useCallback(
+
+    (data: RoomSummary) => {
+
+      queryClient.setQueryData(["room", code], data);
+
+      setVideoUrl(getPlayableStreamUrl(data));
+
+    },
+
+    [queryClient, code],
+
+  );
+
+
+
+  const handleAuthenticated = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+    await queryClient.invalidateQueries({ queryKey: ["room", code] });
+  }, [queryClient, code]);
+
+
+
+  useEffect(() => {
+
+    if (!isAuthenticated || !room.data || hasJoined || joinRoom.isPending) return;
+
+    const isOwner = me.data!.id === room.data.owner.id;
+
+    if (room.data.privacy === "PASSWORD" && !isOwner) return;
+
+    joinRoom.mutate(undefined);
+
+  }, [isAuthenticated, me.data, room.data, hasJoined]); // eslint-disable-line react-hooks/exhaustive-deps
+
+
+
+  useEffect(() => {
+
+    if (room.data && me.data) {
+
+      applyRoomVideo(
+
+        room.data,
+
+        setVideoUrl,
+
+        setShowSetup,
+
+        me.data.id === room.data.owner.id,
+
+      );
+
+    }
+
+  }, [room.data, me.data]);
+
+
+
+  useEffect(() => {
+
+    if (!room.data?.videoSource) return;
+
+    const next = getPlayableStreamUrl(room.data);
+
+    if (next && next !== videoUrl) {
+
+      setVideoUrl(next);
+
+    }
+
+  }, [room.data, videoUrl]);
+
+
+
+  const handleSyncState = useCallback((state: SyncStatePayload) => {
+
+    setSyncState(state);
+
+  }, []);
+
+
+
+  const handleChat = useCallback((msg: ChatMessagePayload) => {
+    setMessages((prev) => [...prev, msg]);
+
+    const overlayId = `comment-${msg.id}`;
+    setPlayerComments((prev) => {
+      const next = [...prev, { id: overlayId, displayName: msg.displayName, content: msg.content }];
+      return next.slice(-4);
+    });
+    setTimeout(() => {
+      setPlayerComments((prev) => prev.filter((c) => c.id !== overlayId));
+    }, 5500);
+  }, []);
+
+
+
+  const handleParticipants = useCallback((p: RoomParticipant[]) => {
+    setParticipants(p);
+  }, []);
+
+
+
+  const handleReaction = useCallback(
+    (data: { displayName: string; emoji: string }) => {
+      const id = Math.random().toString(36);
+      const lane = reactionLaneRef.current % 3;
+      reactionLaneRef.current += 1;
+
+      setReactions((prev) => [...prev, { id, lane, ...data }]);
+
+      setTimeout(() => {
+        setReactions((prev) => prev.filter((r) => r.id !== id));
+      }, 2800);
+    },
+    [],
+  );
+
+
+
+  const handleJoined = useCallback(
+
+    (payload: { recentChat: ChatMessagePayload[] }) => {
+
+      if (payload.recentChat?.length) {
+
+        setMessages(payload.recentChat);
+
+      }
+
+    },
+
+    [],
+
+  );
+
+
+
+  const handleRemoved = useCallback(
+    (payload: { action: "kicked" | "banned"; message: string }) => {
+      setHasJoined(false);
+      alert(payload.message);
+      router.push("/dashboard");
+    },
+    [router],
+  );
+
+  const handleRoomClosed = useCallback((payload: { message: string }) => {
+    setBroadcastEnded(true);
+    setEndedMessage(payload.message || "The host ended the stream");
+    setHasJoined(false);
+  }, []);
+
+  const handleCloseRoom = useCallback(() => {
+    if (
+      !window.confirm(
+        "Close the room? All viewers will see that the stream has ended.",
+      )
+    ) {
+      return;
+    }
+    closeRoom.mutate();
+  }, [closeRoom]);
+
+  const { connected, reconnecting, sendSyncIntent, sendChat, sendReaction, chatCooldown } =
+
+    useRoomSocket({
+
+      roomCode: code,
+
+      token,
+
+      enabled: hasJoined && !!token && isAuthenticated,
+
+      onSyncState: handleSyncState,
+
+      onChatMessage: handleChat,
+
+      onParticipants: handleParticipants,
+
+      onReaction: handleReaction,
+
+      onJoined: handleJoined,
+
+      onRemoved: handleRemoved,
+
+      onRoomClosed: handleRoomClosed,
+
+    });
+
+
+
+  const handleIntent = useCallback(
+
+    (event: "PLAY" | "PAUSE" | "SEEK", time: number) => {
+
+      sendSyncIntent({ event, time });
+
+    },
+
+    [sendSyncIntent],
+
+  );
+
+  const planFeatures = room.data?.planFeatures;
+
+  const voice = useVoiceChat({
+    roomCode: code,
+    token,
+    currentUserId: me.data?.id ?? "",
+    enabled: hasJoined && !!token,
+    enhancedAudio: planFeatures?.enhancedVoice ?? false,
+  });
+
+
+
+  const isOwner = me.data?.id === room.data?.owner.id;
+
+  const myRole = participants.find((p) => p.userId === me.data?.id)?.role;
+  const canControlVideo = myRole ? canControlPlayback(myRole) : false;
+
+  const isCatalogRoom =
+
+    (room.data?.videoSource?.metadata as { provider?: string } | undefined)
+
+      ?.provider === "rezka";
+
+  const needsPassword =
+
+    isAuthenticated &&
+
+    room.data?.privacy === "PASSWORD" &&
+
+    !isOwner &&
+
+    !hasJoined;
+
+
+
+  const showSessionCheck =
+    authReady && hasToken && !me.data && (me.isPending || me.isFetching);
+
+  const showGuestAuth =
+    authReady && !isAuthenticated && !showSessionCheck;
+
+  const showRoomLoading =
+    isAuthenticated &&
+    !room.data &&
+    (room.isLoading || room.isFetching) &&
+    !room.isError;
+
+
+
+  if (preview.isLoading) {
+    return (
+      <LoadingScreen
+        message="Loading room..."
+        className="h-screen bg-[#0b0b0f]"
+      />
+    );
+  }
+
+  if (preview.isError || !preview.data) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-black px-4">
+        <p className="text-[#e50914]">Room not found or link is invalid</p>
+        <Button onClick={() => router.push("/")}>Go home</Button>
+      </div>
+    );
+  }
+
+  if (showGuestAuth || showSessionCheck) {
+    return (
+      <div className="relative h-screen overflow-hidden">
+        <RoomPreviewTheater preview={preview.data} blurred className="blur-[6px]" />
+        <div className="pointer-events-none absolute inset-0 bg-black/50 backdrop-blur-[2px]" />
+        {showSessionCheck ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+            <LoadingSpinner size="md" label="Checking session" />
+            <p className="text-sm text-white/60">Checking session...</p>
+          </div>
+        ) : (
+          <RoomGuestAuthModal
+            roomCode={code}
+            hostName={preview.data.owner.displayName}
+            onAuthenticated={handleAuthenticated}
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (showRoomLoading) {
+    return (
+      <LoadingScreen
+        message="Joining room..."
+        className="h-screen bg-[#0b0b0f]"
+      />
+    );
+  }
+
+
+
+  if (needsPassword) {
+
+    return (
+
+      <RoomPasswordForm
+
+        roomCode={code}
+
+        isPending={joinRoom.isPending}
+
+        error={joinError}
+
+        onSubmit={(password) => {
+
+          setJoinError(null);
+
+          joinRoom.mutate(password);
+
+        }}
+
+      />
+
+    );
+
+  }
+
+
+
+  if (joinRoom.isError && !hasJoined) {
+
+    return (
+
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-black px-4">
+
+        <p className="text-[#e50914]">
+
+          {joinError ?? "Could not join room"}
+
+        </p>
+
+        <Button onClick={() => router.push("/dashboard")}>Go Home</Button>
+
+      </div>
+
+    );
+
+  }
+
+
+
+  if (room.isLoading || joinRoom.isPending) {
+    return (
+      <LoadingScreen
+        message="Entering watch party..."
+        className="h-screen bg-[#0b0b0f]"
+      />
+    );
+  }
+
+
+
+  return (
+
+    <div className="flex h-screen flex-col overflow-hidden bg-[#0b0b0f]">
+
+      {room.data && (
+
+        <RoomHeader
+
+          room={room.data}
+
+          code={code}
+
+          connected={connected}
+
+          reconnecting={reconnecting}
+
+          hasJoined={hasJoined}
+
+          participantCount={participants.length || 1}
+
+          participants={participants}
+
+          isOwner={!!isOwner}
+
+          currentUserId={me.data?.id}
+
+          onBack={() => router.push("/dashboard")}
+
+          onCloseRoom={isOwner ? handleCloseRoom : undefined}
+
+          isClosingRoom={closeRoom.isPending}
+
+          voiceSlot={
+            hasJoined ? (
+              <VoiceControls
+                connected={voice.connected}
+                muted={voice.muted}
+                peerCount={voice.voicePeers?.length ?? 0}
+                error={voice.error}
+                onJoin={voice.joinVoice}
+                onLeave={voice.leaveVoice}
+                onToggleMute={voice.toggleMute}
+              />
+            ) : null
+          }
+
+        />
+
+      )}
+
+
+
+      <div className="flex min-h-0 flex-1">
+
+        {/* Main theater column */}
+
+        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto scrollbar-dimovie">
+
+          <div className="flex flex-1 flex-col justify-center bg-[radial-gradient(ellipse_at_center,_#1a1a1f_0%,_#0b0b0f_70%)] px-4 py-5 md:px-6 lg:px-8">
+
+            {showSetup && isOwner && room.data ? (
+
+              <div className="mx-auto w-full max-w-lg space-y-6">
+
+                <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-[#181818] shadow-2xl">
+
+                  <div className="border-b border-white/[0.06] bg-gradient-to-r from-[#e50914]/10 to-transparent px-6 py-4">
+
+                    <h2 className="text-lg font-bold">Set up your watch party</h2>
+
+                    <p className="mt-1 text-sm text-white/50">
+
+                      YouTube, Vimeo, or a direct video link
+
+                    </p>
+
+                  </div>
+
+                  <div className="space-y-4 p-6">
+
+                    <div>
+
+                      <Label className="text-white/70">Video URL</Label>
+
+                      <Input
+
+                        value={setupUrl}
+
+                        onChange={(e) => setSetupUrl(e.target.value)}
+
+                        placeholder="https://youtube.com/watch?v=..."
+
+                        className="mt-2 h-11 border-white/10 bg-white/[0.04] focus-visible:ring-[#e50914]/50"
+
+                      />
+
+                    </div>
+
+                    {setVideo.isError && (
+
+                      <p className="text-sm text-[#e50914]">
+
+                        {(setVideo.error as Error).message}
+
+                      </p>
+
+                    )}
+
+                    <Button
+
+                      className="h-11 w-full bg-[#e50914] text-sm font-semibold hover:bg-[#f40612]"
+
+                      onClick={() => setVideo.mutate(setupUrl)}
+
+                      disabled={!setupUrl || setVideo.isPending}
+
+                    >
+
+                      {setVideo.isPending ? "Loading..." : "Start Watching"}
+
+                    </Button>
+
+                  </div>
+
+                </div>
+
+
+
+                <div className="flex items-center gap-3 text-xs uppercase tracking-wider text-white/30">
+
+                  <div className="h-px flex-1 bg-white/10" />
+
+                  <span>or your own resource</span>
+
+                  <div className="h-px flex-1 bg-white/10" />
+
+                </div>
+
+
+
+                <RoomCatalogSetup
+
+                  roomId={room.data.id}
+
+                  onSuccess={(data) => {
+
+                    handleCatalogUpdated(data);
+
+                    setShowSetup(false);
+
+                  }}
+
+                />
+
+              </div>
+
+            ) : videoUrl ? (
+
+              <div className="relative mx-auto w-full max-w-5xl">
+
+                <SyncVideoPlayer
+
+                  url={videoUrl}
+
+                  syncState={syncState}
+
+                  onIntent={handleIntent}
+
+                  broadcastEnded={broadcastEnded}
+
+                  endedMessage={endedMessage}
+
+                  onLeave={() => router.push("/dashboard")}
+
+                  maxVideoQuality={planFeatures?.maxVideoQuality ?? "1080p"}
+
+                  syncDriftThresholdMs={planFeatures?.syncDriftThresholdMs ?? 1500}
+
+                  canControl={canControlVideo}
+
+                  overlay={
+                    <PlayerLiveOverlay
+                      reactions={reactions}
+                      comments={playerComments}
+                    />
+                  }
+
+                />
+
+              </div>
+
+            ) : (
+
+              <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
+
+                <div className="flex size-16 items-center justify-center rounded-full bg-white/[0.04] ring-1 ring-white/[0.06]">
+
+                  <Film className="size-8 text-white/20" />
+
+                </div>
+
+                <div>
+
+                  <p className="font-medium text-white/60">
+
+                    Waiting for the host to pick a video
+
+                  </p>
+
+                  <p className="mt-1 text-sm text-white/30">
+
+                    You&apos;ll see it here when they&apos;re ready
+
+                  </p>
+
+                </div>
+
+                <LoadingSpinner size="sm" />
+
+              </div>
+
+            )}
+
+          </div>
+
+
+
+          {isOwner && isCatalogRoom && room.data && videoUrl && !showSetup && (
+
+            <HostCatalogControls
+
+              room={room.data}
+
+              onUpdated={handleCatalogUpdated}
+
+            />
+
+          )}
+
+          {isOwner && room.data && videoUrl && !showSetup && planFeatures?.roomAnalytics && (
+            <RoomAnalyticsPanel
+              roomId={room.data.id}
+              className="mx-auto mt-4 max-w-5xl px-4 md:px-6 lg:px-8"
+            />
+          )}
+
+          {isOwner && room.data && !showSetup && (
+            <RoomBrandingForm room={room.data} onUpdated={handleCatalogUpdated} />
+          )}
+
+
+
+          {room.data && videoUrl && !showSetup && (
+
+            <RoomDetails
+
+              room={room.data}
+
+              participants={participants}
+
+            />
+
+          )}
+
+        </div>
+
+
+
+        {/* Chat sidebar — desktop */}
+
+        <aside className="hidden shrink-0 border-l border-white/[0.06] lg:flex lg:w-[360px] xl:w-[400px]">
+
+          <ChatPanel
+
+            messages={messages}
+
+            onSend={sendChat}
+
+            onReaction={sendReaction}
+
+            currentUserId={me.data?.id}
+
+            participantCount={participants.length || 1}
+
+            chatCooldown={chatCooldown}
+
+            className="w-full"
+
+          />
+
+        </aside>
+
+      </div>
+
+
+
+      {/* Mobile chat sheet */}
+
+      <ChatPanel
+
+        messages={messages}
+
+        onSend={sendChat}
+
+        onReaction={sendReaction}
+
+        currentUserId={me.data?.id}
+
+        participantCount={participants.length || 1}
+
+        chatCooldown={chatCooldown}
+
+        mobileOpen={chatOpen}
+
+        onMobileClose={() => setChatOpen(false)}
+
+      />
+
+
+
+      {!chatOpen && hasJoined && (
+
+        <Button
+
+          onClick={() => setChatOpen(true)}
+
+          className="fixed bottom-5 right-5 z-40 size-14 rounded-full bg-[#e50914] shadow-[0_8px_32px_rgba(229,9,20,0.4)] hover:bg-[#f40612] lg:hidden"
+
+          size="icon"
+
+        >
+
+          <MessageCircle className="size-6" />
+
+          {messages.length > 0 && (
+
+            <span className="absolute -right-0.5 -top-0.5 flex size-5 items-center justify-center rounded-full bg-white text-[10px] font-bold text-[#e50914]">
+
+              {messages.length > 9 ? "9+" : messages.length}
+
+            </span>
+
+          )}
+
+        </Button>
+
+      )}
+
+    </div>
+
+  );
+
+}
+
+

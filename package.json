@@ -1,0 +1,27 @@
+{
+  "name": "dimovie",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:web": "npm run dev --workspace=web",
+    "dev:api": "npm run start:dev --workspace=api",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "db:generate": "npm run prisma:generate --workspace=api",
+    "db:migrate": "npm run prisma:migrate --workspace=api",
+    "db:migrate:deploy": "npm run prisma:migrate:deploy --workspace=api",
+    "db:push": "npm run prisma:push --workspace=api"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.4"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "npm@11.12.1"
+}
