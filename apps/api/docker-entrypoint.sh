@@ -23,7 +23,7 @@ fi
 
 echo "Running Prisma migrations..."
 cd /app/apps/api
-npx prisma migrate deploy
+npm exec -- prisma migrate deploy
 
 echo "Starting Nest on 0.0.0.0:${PORT:-4000}..."
 exec node dist/main.js
