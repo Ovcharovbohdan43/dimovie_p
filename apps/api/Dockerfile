@@ -21,12 +21,15 @@ COPY packages/shared ./packages/shared
 COPY apps/api ./apps/api
 
 RUN npm run build --workspace=@dimovie/shared \
-  && cd apps/api \
-  && npx prisma generate \
-  && npm run build
+  && npx prisma generate --schema=apps/api/prisma/schema.prisma \
+  && npm run build --workspace=api
 
+# prune can drop/hoist workspace packages oddly; reinstall Prisma and regenerate
 RUN npm prune --omit=dev \
-  && npm install prisma@5.22.0 --workspace=api --no-save --omit=dev
+  && npm install @prisma/client@5.22.0 prisma@5.22.0 --workspace=api --omit=dev \
+  && npx prisma generate --schema=apps/api/prisma/schema.prisma \
+  && mkdir -p apps/api/node_modules \
+  && cd apps/api && node -e "require('@prisma/client'); console.log('prisma client ok')"
 
 FROM node:22-bookworm-slim AS runner
 
@@ -45,6 +48,7 @@ COPY --from=builder /app/package.json /app/package-lock.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/shared ./packages/shared
 COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
+COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
 COPY apps/api/docker-entrypoint.sh /app/apps/api/docker-entrypoint.sh
