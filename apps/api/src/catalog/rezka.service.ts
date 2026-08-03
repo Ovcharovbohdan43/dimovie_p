@@ -144,16 +144,24 @@ export class RezkaCatalogService implements OnModuleDestroy {
   private async getBrowser(): Promise<Browser> {
     if (this.browser?.isConnected()) return this.browser;
     if (!this.browserInit) {
-      this.browserInit = chromium.launch({
-        headless: true,
-        args: [
-          '--disable-blink-features=AutomationControlled',
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-        ],
-      });
+      this.browserInit = chromium
+        .launch({
+          headless: true,
+          args: [
+            '--disable-blink-features=AutomationControlled',
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+          ],
+        })
+        .catch((err) => {
+          this.browserInit = null;
+          throw new BadRequestException(
+            `Catalog browser unavailable (${err instanceof Error ? err.message : 'playwright'}). ` +
+              'Chromium is not bundled in the API image; use embed URLs or install Playwright browsers on the host.',
+          );
+        });
     }
     this.browser = await this.browserInit;
     return this.browser;
