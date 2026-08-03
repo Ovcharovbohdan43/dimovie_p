@@ -1,5 +1,14 @@
-const SERVER_API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+function normalizeApiUrl(raw: string): string {
+  let url = raw.trim();
+  if (!/^https?:\/\//i.test(url)) {
+    url = `https://${url}`;
+  }
+  return url.replace("://localhost", "://127.0.0.1").replace(/\/+$/, "");
+}
+
+const SERVER_API_URL = normalizeApiUrl(
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000",
+);
 
 /** Browser uses same-origin proxy; server/WS use direct URL */
 export function getApiUrl(): string {
