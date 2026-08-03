@@ -146,7 +146,13 @@ export class RezkaCatalogService implements OnModuleDestroy {
     if (!this.browserInit) {
       this.browserInit = chromium.launch({
         headless: true,
-        args: ['--disable-blink-features=AutomationControlled'],
+        args: [
+          '--disable-blink-features=AutomationControlled',
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+        ],
       });
     }
     this.browser = await this.browserInit;

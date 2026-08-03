@@ -14,3 +14,30 @@ services:
     ports:
       - "6379:6379"
     restart: unless-stopped
+
+  # Optional TURN for WebRTC voice behind NAT.
+  # Start: docker compose --profile voice up -d coturn
+  coturn:
+    image: coturn/coturn:4.6.2
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "49160-49200:49160-49200/udp"
+    environment:
+      DETECT_EXTERNAL_IP: "yes"
+    command:
+      - -n
+      - --log-file=stdout
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --fingerprint
+      - --lt-cred-mech
+      - --user=dimovie:dimovie
+      - --realm=dimovie.local
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+    restart: unless-stopped
+    profiles:
+      - voice

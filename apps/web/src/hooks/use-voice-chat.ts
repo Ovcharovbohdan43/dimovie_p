@@ -3,18 +3,42 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { WS_ROOM_EVENTS } from "@dimovie/shared";
-import type { VoiceJoinPayload, VoicePeerInfo } from "@dimovie/shared";
+import type {
+  VoiceIceServer,
+  VoiceJoinPayload,
+  VoicePeerInfo,
+} from "@dimovie/shared";
 import { API_URL } from "@/lib/api";
 
-const ICE_SERVERS: RTCIceServer[] = [
+const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
 ];
+
+function toRtcIceServers(servers?: VoiceIceServer[]): RTCIceServer[] {
+  if (!servers?.length) return DEFAULT_ICE_SERVERS;
+  return servers.map((s) => ({
+    urls: s.urls,
+    ...(s.username ? { username: s.username } : {}),
+    ...(s.credential ? { credential: s.credential } : {}),
+  }));
+}
 
 function extractVoicePeers(
   payload: VoiceJoinPayload | VoicePeerInfo[] | { peers?: VoicePeerInfo[] },
 ): VoicePeerInfo[] {
   if (Array.isArray(payload)) return payload;
   return payload.peers ?? [];
+}
+
+function extractIceServers(
+  payload: VoiceJoinPayload | VoicePeerInfo[] | { peers?: VoicePeerInfo[] },
+): RTCIceServer[] | null {
+  if (Array.isArray(payload)) return null;
+  if ("iceServers" in payload && payload.iceServers) {
+    return toRtcIceServers(payload.iceServers);
+  }
+  return null;
 }
 
 interface UseVoiceChatOptions {
@@ -57,7 +81,10 @@ export function useVoiceChat({
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const audioElsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
-  const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
+  const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(
+    new Map(),
+  );
+  const iceServersRef = useRef<RTCIceServer[]>(DEFAULT_ICE_SERVERS);
   const currentUserIdRef = useRef(currentUserId);
 
   useEffect(() => {
@@ -110,7 +137,9 @@ export function useVoiceChat({
     async (targetUserId: string, initiator: boolean) => {
       if (peersRef.current.has(targetUserId)) return;
 
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const pc = new RTCPeerConnection({
+        iceServers: iceServersRef.current,
+      });
       peersRef.current.set(targetUserId, pc);
 
       const localStream = localStreamRef.current;
@@ -254,8 +283,14 @@ export function useVoiceChat({
       socket.on(
         WS_ROOM_EVENTS.VOICE_PEERS,
         async (
-          payload: VoiceJoinPayload | VoicePeerInfo[] | { peers?: VoicePeerInfo[] },
+          payload:
+            | VoiceJoinPayload
+            | VoicePeerInfo[]
+            | { peers?: VoicePeerInfo[] },
         ) => {
+          const ice = extractIceServers(payload);
+          if (ice) iceServersRef.current = ice;
+
           const peers = extractVoicePeers(payload);
           setVoicePeers(peers);
 

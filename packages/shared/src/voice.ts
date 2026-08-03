@@ -13,10 +13,17 @@ export interface MediasoupRouterCapabilities {
   routerRtpCapabilities: unknown;
 }
 
+export interface VoiceIceServer {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
 export interface VoiceJoinPayload {
   mode: "p2p" | "sfu";
   maxPeers: number;
   enhancedAudio: boolean;
+  iceServers?: VoiceIceServer[];
   routerRtpCapabilities?: unknown;
   transport?: {
     id: string;

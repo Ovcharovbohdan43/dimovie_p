@@ -95,7 +95,10 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       displayName: client.user.displayName,
     });
 
-    const useSfu = caps.voiceMode === 'sfu' && caps.enhancedVoice;
+    const useSfu =
+      caps.voiceMode === 'sfu' &&
+      caps.enhancedVoice &&
+      this.voiceService.isSfuReady();
     const transport = useSfu
       ? await this.voiceService.createWebRtcTransport(roomCode)
       : null;
@@ -107,6 +110,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       mode: useSfu && transport ? 'sfu' : 'p2p',
       maxPeers: caps.maxVoicePeers,
       enhancedAudio: caps.enhancedVoice,
+      iceServers: this.voiceService.getIceServers(),
       routerRtpCapabilities: capsRtp,
       transport: transport
         ? {
