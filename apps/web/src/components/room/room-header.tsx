@@ -104,11 +104,6 @@ export function RoomHeader({
     }
   };
 
-  const videoTitle =
-    room.branding?.displayTitle ??
-    (room.videoSource?.metadata as { title?: string })?.title ??
-    `Room ${code}`;
-
   const accent = room.branding?.accentColor ?? "#e50914";
   const live = connected && !reconnecting && hasJoined;
   const statusLabel = reconnecting || !hasJoined
@@ -141,8 +136,8 @@ export function RoomHeader({
                 DiMovie
               </span>
               <span className="hidden text-white/20 sm:inline">/</span>
-              <h1 className="min-w-0 truncate font-display text-sm font-semibold tracking-[-0.02em] text-white/90">
-                {videoTitle}
+              <h1 className="min-w-0 truncate font-sans text-sm font-semibold tracking-[-0.02em] text-white/55">
+                {code}
               </h1>
             </div>
           </div>
@@ -181,12 +176,12 @@ export function RoomHeader({
             <button
               type="button"
               onClick={() => setParticipantsOpen(true)}
-              aria-label="Participants"
-              className="inline-flex h-8 items-center gap-1.5 border border-white/10 bg-white/[0.04] px-2 text-[11px] font-medium tabular-nums text-white/75 transition hover:bg-white/10 hover:text-white"
+              aria-label={`${participantCount} participants`}
+              title={`${participantCount}/${room.maxUsers}`}
+              className="inline-flex h-8 items-center gap-1.5 px-1.5 text-[12px] font-semibold tabular-nums text-white/75 transition hover:text-white"
             >
               <PeopleMark className="size-3.5 opacity-70" />
               {participantCount}
-              <span className="hidden text-white/35 sm:inline">/{room.maxUsers}</span>
             </button>
 
             <button
@@ -195,16 +190,16 @@ export function RoomHeader({
               aria-label={shareLabel}
               aria-live="polite"
               className={cn(
-                "inline-flex h-8 items-center gap-1.5 border px-2 text-[11px] font-medium transition",
+                "inline-flex h-8 items-center gap-1.5 px-1.5 text-[12px] font-semibold transition",
                 shareError
-                  ? "border-[#e50914]/50 bg-[#e50914]/15 text-[#ff6b73]"
+                  ? "text-[#ff6b73]"
                   : copied
-                    ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
-                    : "border-white/10 bg-white/[0.04] text-white/75 hover:bg-white/10 hover:text-white",
+                    ? "text-emerald-300"
+                    : "text-white/75 hover:text-white",
               )}
             >
               <ShareMark className="size-3.5 opacity-70" />
-              <span>{shareLabel}</span>
+              <span className="hidden sm:inline">{shareLabel}</span>
             </button>
           </div>
         </div>

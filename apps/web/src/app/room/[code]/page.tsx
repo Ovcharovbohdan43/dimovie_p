@@ -17,7 +17,6 @@ import { LoadingScreen, LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SyncVideoPlayer } from "@/components/room/sync-video-player";
 import { ChatPanel } from "@/components/room/chat-panel";
 import { RoomHeader } from "@/components/room/room-header";
-import { RoomDetails } from "@/components/room/room-details";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,7 +25,6 @@ import { getVideoPreview, canControlPlayback } from "@dimovie/shared";
 import { RoomPasswordForm } from "@/components/room/room-password-form";
 import { RoomCatalogSetup } from "@/components/room/room-catalog-setup";
 import { HostCatalogControls } from "@/components/room/host-catalog-controls";
-import { RoomAnalyticsPanel } from "@/components/room/room-analytics-panel";
 import { RoomBrandingForm } from "@/components/room/room-branding-form";
 import { VoiceControls } from "@/components/room/voice-controls";
 import { VoiceDock } from "@/components/room/voice-dock";
@@ -564,7 +562,7 @@ export default function RoomPage({
     );
   }
   return (
-    <div className="dm-app flex h-screen flex-col overflow-hidden">
+    <div className="dm-app flex h-screen flex-col overflow-hidden overflow-x-hidden">
       {room.data && (
         <RoomHeader
           room={room.data}
@@ -601,15 +599,6 @@ export default function RoomPage({
         {/* Main theater column */}
         <div className="flex min-w-0 flex-1 flex-col overflow-y-auto scrollbar-dimovie">
           <div className="relative flex flex-1 flex-col justify-center px-3 py-4 sm:px-4 md:px-6 lg:px-8">
-            {room.data && videoUrl && !showSetup ? (
-              <div className="relative mx-auto w-full max-w-[1400px]">
-                <RoomMetaBar
-                  room={room.data}
-                  participantCount={participants.length || 1}
-                  watchSeconds={watchSeconds}
-                />
-              </div>
-            ) : null}
             {showSetup && isOwner && room.data ? (
               <div className="relative mx-auto w-full max-w-xl space-y-6">
                 <div className="dm-glass overflow-hidden rounded-[20px]">
@@ -658,9 +647,18 @@ export default function RoomPage({
                   }}
                 />
               </div>
-            ) : videoUrl ? (
+            ) : videoUrl && room.data ? (
               <div className="relative mx-auto w-full max-w-[1400px]">
-                <div className="overflow-hidden rounded-[20px] shadow-[0_24px_80px_rgba(0,0,0,0.55)] ring-1 ring-white/[0.08]">
+                <RoomMetaBar
+                  room={room.data}
+                  participants={participants}
+                  participantCount={participants.length || 1}
+                  watchSeconds={watchSeconds}
+                  showAnalytics={
+                    !!isOwner && !!planFeatures?.roomAnalytics
+                  }
+                />
+                <div className="overflow-hidden rounded-[16px] shadow-[0_24px_80px_rgba(0,0,0,0.55)] ring-1 ring-white/[0.08] sm:rounded-[20px]">
                   <SyncVideoPlayer
                     url={videoUrl}
                     syncState={syncState}
@@ -680,7 +678,7 @@ export default function RoomPage({
                     }
                   />
                 </div>
-                {isOwner && isCatalogRoom && room.data && !showSetup && (
+                {isOwner && isCatalogRoom && !showSetup && (
                   <HostCatalogControls
                     room={room.data}
                     onUpdated={handleCatalogUpdated}
@@ -724,24 +722,12 @@ export default function RoomPage({
               </div>
             )}
           </div>
-          {isOwner && room.data && videoUrl && !showSetup && planFeatures?.roomAnalytics && (
-            <RoomAnalyticsPanel
-              roomId={room.data.id}
-              className="mx-auto mt-4 max-w-5xl px-4 md:px-6 lg:px-8"
-            />
-          )}
           {isOwner && room.data && !showSetup && (
             <RoomBrandingForm room={room.data} onUpdated={handleCatalogUpdated} />
           )}
-          {room.data && videoUrl && !showSetup && (
-            <RoomDetails
-              room={room.data}
-              participants={participants}
-            />
-          )}
         </div>
         {/* Chat sidebar — desktop */}
-        <aside className="hidden shrink-0 border-l border-white/[0.06] lg:flex lg:w-[360px] xl:w-[400px]">
+        <aside className="hidden min-w-0 shrink-0 overflow-x-hidden border-l border-white/[0.06] lg:flex lg:w-[340px] xl:w-[380px]">
           <ChatPanel
             messages={messages}
             onSend={handleSendChat}

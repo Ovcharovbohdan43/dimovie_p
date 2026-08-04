@@ -87,7 +87,12 @@ export function ChatPanel({
   };
 
   const panel = (
-    <div className={cn("dm-glass flex h-full flex-col rounded-none", className)}>
+    <div
+      className={cn(
+        "dm-glass flex h-full min-w-0 flex-col overflow-x-hidden rounded-none",
+        className,
+      )}
+    >
       <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-4">
         <div>
           <h3 className="text-sm font-semibold tracking-[-0.01em] text-white">
@@ -165,9 +170,11 @@ export function ChatPanel({
                         isOwn && "flex-row-reverse",
                       )}
                     >
-                      <span className="text-[12px] font-semibold tracking-[-0.01em] text-white">
-                        {isOwn ? "You" : msg.displayName}
-                      </span>
+                      {!isOwn && (
+                        <span className="text-[12px] font-semibold tracking-[-0.01em] text-white">
+                          {msg.displayName}
+                        </span>
+                      )}
                       <span className="text-[10px] text-white/25">
                         {formatMessageTime(msg.createdAt)}
                       </span>
@@ -201,26 +208,27 @@ export function ChatPanel({
         </div>
       </ScrollArea>
 
-      <div className="shrink-0 border-t border-white/[0.06] bg-black/20 p-3">
-        <div className="mb-2 flex items-center gap-1.5">
-          {QUICK_REACTIONS.map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              onClick={() => onReaction(emoji)}
-              className="grid size-8 place-items-center rounded-xl text-base transition hover:bg-white/10"
-              aria-label={`React ${emoji}`}
-            >
-              {emoji}
-            </button>
-          ))}
-          <div className="ml-auto">
-            <ChatEmojiPicker
-              iconOnly
-              onInsert={(emoji) => setInput((prev) => prev + emoji)}
-              onReaction={onReaction}
-            />
+      <div className="relative z-10 min-w-0 shrink-0 overflow-x-hidden border-t border-white/[0.06] bg-black/20 p-3">
+        <div className="mb-2 flex min-w-0 items-center gap-1">
+          <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-hide">
+            {QUICK_REACTIONS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => onReaction(emoji)}
+                className="grid size-8 shrink-0 place-items-center rounded-xl text-base transition hover:bg-white/10"
+                aria-label={`React ${emoji}`}
+              >
+                {emoji}
+              </button>
+            ))}
           </div>
+          <ChatEmojiPicker
+            iconOnly
+            className="shrink-0"
+            onInsert={(emoji) => setInput((prev) => prev + emoji)}
+            onReaction={onReaction}
+          />
         </div>
         <form onSubmit={handleSubmit} className="relative">
           <Input
@@ -267,7 +275,7 @@ export function ChatPanel({
           className="absolute inset-0 bg-black/70 backdrop-blur-sm"
           onClick={onMobileClose}
         />
-        <div className="absolute bottom-0 left-0 right-0 h-[78vh] overflow-hidden rounded-t-[20px] border-t border-white/10 shadow-2xl">
+        <div className="absolute bottom-0 left-0 right-0 h-[78vh] min-w-0 overflow-hidden overflow-x-hidden rounded-t-[20px] border-t border-white/10 shadow-2xl">
           {panel}
         </div>
       </div>
