@@ -191,12 +191,15 @@ export function useVoiceChat({
   const [error, setError] = useState<string | null>(null);
   const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
 
+  const iceRestartingRef = useRef<Set<string>>(new Set());
+
   const cleanupPeer = useCallback((userId: string) => {
     peersRef.current.get(userId)?.close();
     peersRef.current.delete(userId);
     audioElsRef.current.get(userId)?.remove();
     audioElsRef.current.delete(userId);
     pendingCandidatesRef.current.delete(userId);
+    iceRestartingRef.current.delete(userId);
   }, []);
 
   const cleanupAll = useCallback(() => {
@@ -228,8 +231,6 @@ export function useVoiceChat({
     },
     [],
   );
-
-  const iceRestartingRef = useRef<Set<string>>(new Set());
 
   const createPeerConnection = useCallback(
     async (targetUserId: string, initiator: boolean) => {
