@@ -63,7 +63,7 @@ export class SyncService {
       !canControlPlayback(role)
     ) {
       throw new ForbiddenException(
-        'Only the host or admins can control playback',
+        'Join the room to control playback',
       );
     }
 

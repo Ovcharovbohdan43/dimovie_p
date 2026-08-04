@@ -57,9 +57,12 @@ export const ParticipantRole = {
 export type ParticipantRoleType =
   (typeof ParticipantRole)[keyof typeof ParticipantRole];
 
+/** Democratic playback — any joined participant may play / pause / seek. */
 export function canControlPlayback(role: string): boolean {
   return (
-    role === ParticipantRole.OWNER || role === ParticipantRole.ADMIN
+    role === ParticipantRole.OWNER ||
+    role === ParticipantRole.ADMIN ||
+    role === ParticipantRole.MEMBER
   );
 }
 

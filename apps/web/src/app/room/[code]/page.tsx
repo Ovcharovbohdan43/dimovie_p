@@ -524,7 +524,11 @@ export default function RoomPage({
   const isOwner = me.data?.id === room.data?.owner.id;
 
   const myRole = participants.find((p) => p.userId === me.data?.id)?.role;
-  const canControlVideo = myRole ? canControlPlayback(myRole) : false;
+  // Owner always; any joined member once role arrives; allow briefly after join
+  // before the participants list syncs (otherwise play stays disabled while Offline).
+  const canControlVideo =
+    Boolean(isOwner) ||
+    (myRole ? canControlPlayback(myRole) : hasJoined);
 
   const isCatalogRoom =
 
@@ -729,6 +733,7 @@ export default function RoomPage({
           voiceSlot={
             hasJoined ? (
               <VoiceControls
+                compact
                 connected={voice.connected}
                 muted={voice.muted}
                 peerCount={voice.voicePeers?.length ?? 0}

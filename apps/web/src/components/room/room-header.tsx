@@ -2,10 +2,14 @@
 
 import { useState, type ReactNode } from "react";
 import type { RoomParticipant, RoomSummary } from "@dimovie/shared";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { RoomParticipantsMenu } from "@/components/room/room-participants-menu";
-import { BackMark, LiveDot } from "@/components/home/marks";
+import {
+  BackMark,
+  LiveDot,
+  PeopleMark,
+  ShareMark,
+} from "@/components/home/marks";
 
 interface RoomHeaderProps {
   room: RoomSummary;
@@ -52,98 +56,110 @@ export function RoomHeader({
   const videoTitle =
     room.branding?.displayTitle ??
     (room.videoSource?.metadata as { title?: string })?.title ??
-    `Watch Party · ${code}`;
+    `Room ${code}`;
 
   const accent = room.branding?.accentColor ?? "#e50914";
   const live = connected && !reconnecting && hasJoined;
+  const statusLabel = reconnecting || !hasJoined
+    ? "…"
+    : connected
+      ? "Live"
+      : "Off";
 
   return (
     <>
-      <header className="relative z-20 shrink-0 border-b border-white/[0.06] bg-[#08080c]/88 backdrop-blur-xl">
-        <div className="mx-auto flex h-14 max-w-[1920px] items-center justify-between gap-3 px-4 sm:gap-4 md:px-6 lg:px-8">
-          <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onBack}
-              className="shrink-0 text-white/70 hover:bg-white/10 hover:text-white"
-            >
-              <BackMark className="size-5" />
-            </Button>
+      <header className="relative z-20 shrink-0 border-b border-white/[0.06] bg-[#08080c]/90 backdrop-blur-xl">
+        <div className="mx-auto flex h-12 max-w-[1920px] items-center gap-2 px-3 sm:h-12 sm:gap-3 sm:px-4 md:px-6">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Back"
+            className="grid size-8 shrink-0 place-items-center text-white/65 transition hover:bg-white/10 hover:text-white"
+          >
+            <BackMark className="size-4" />
+          </button>
 
-            <div className="min-w-0">
-              {room.branding?.logoUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={room.branding.logoUrl}
-                  alt=""
-                  className="mb-1 h-5 w-auto object-contain"
-                />
-              )}
-              <p
-                className="truncate text-[10px] font-semibold uppercase tracking-[0.2em]"
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-baseline gap-2">
+              <span
+                className="shrink-0 font-display text-sm font-bold tracking-[-0.04em]"
                 style={{ color: accent }}
               >
-                DiMovie Watch Party
-              </p>
-              <h1 className="truncate font-display text-sm font-semibold tracking-[-0.02em] text-white md:text-base">
+                DiMovie
+              </span>
+              <span className="hidden text-white/20 sm:inline">/</span>
+              <h1 className="min-w-0 truncate font-display text-sm font-semibold tracking-[-0.02em] text-white/90">
                 {videoTitle}
               </h1>
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 md:gap-3">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 px-1.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                live ? "text-[#ff6b73]" : "text-white/40",
+              )}
+              title={
+                reconnecting || !hasJoined
+                  ? "Connecting"
+                  : connected
+                    ? "Live"
+                    : "Offline"
+              }
+            >
+              <LiveDot className={live ? "text-[#e50914]" : "text-white/30"} />
+              <span className="hidden xs:inline sm:inline">{statusLabel}</span>
+            </span>
+
             {voiceSlot}
 
-            <div
-              className={cn(
-                "hidden items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] sm:flex",
-                live
-                  ? "bg-[#e50914]/15 text-[#ff6b73]"
-                  : "bg-white/[0.06] text-white/55",
-              )}
-            >
-              <LiveDot className={live ? "text-[#e50914]" : "text-white/35"} />
-              {reconnecting || !hasJoined
-                ? "Connecting"
-                : connected
-                  ? "Live"
-                  : "Offline"}
-            </div>
-
             {isOwner && onCloseRoom && hasJoined && (
-              <Button
-                size="sm"
-                variant="outline"
+              <button
+                type="button"
                 onClick={onCloseRoom}
                 disabled={isClosingRoom}
-                className="h-8 border-[#e50914]/30 bg-[#e50914]/10 text-xs text-[#e50914] hover:bg-[#e50914]/20"
+                className="hidden h-8 items-center px-2 text-[11px] font-medium text-[#e50914] transition hover:bg-[#e50914]/10 disabled:opacity-50 md:inline-flex"
               >
-                {isClosingRoom ? "Closing..." : "Close room"}
-              </Button>
+                {isClosingRoom ? "Closing…" : "Close"}
+              </button>
             )}
 
             <button
               type="button"
               onClick={() => setParticipantsOpen(true)}
-              className="flex cursor-pointer select-none items-center gap-1.5 bg-white/[0.06] px-2.5 py-1 text-xs text-white/70 ring-1 ring-white/[0.06] transition hover:bg-white/10 hover:text-white"
-              aria-label="Open participants list"
+              aria-label="Participants"
+              className="inline-flex h-8 items-center gap-1.5 border border-white/10 bg-white/[0.04] px-2 text-[11px] font-medium tabular-nums text-white/75 transition hover:bg-white/10 hover:text-white"
             >
-              <span className="font-medium tabular-nums">
-                {participantCount}/{room.maxUsers}
-              </span>
+              <PeopleMark className="size-3.5 opacity-70" />
+              {participantCount}
+              <span className="hidden text-white/35 sm:inline">/{room.maxUsers}</span>
             </button>
 
-            <Button
-              size="sm"
-              variant="outline"
+            <button
+              type="button"
               onClick={handleShare}
-              className="h-8 border-white/10 bg-white/[0.04] text-xs hover:bg-white/10"
+              aria-label="Share room"
+              className="inline-flex h-8 items-center gap-1.5 border border-white/10 bg-white/[0.04] px-2 text-[11px] font-medium text-white/75 transition hover:bg-white/10 hover:text-white"
             >
-              {copied ? "Copied" : "Share"}
-            </Button>
+              <ShareMark className="size-3.5 opacity-70" />
+              <span className="hidden sm:inline">{copied ? "Copied" : "Share"}</span>
+            </button>
           </div>
         </div>
+
+        {isOwner && onCloseRoom && hasJoined && (
+          <div className="flex justify-end border-t border-white/[0.04] px-3 py-1 md:hidden">
+            <button
+              type="button"
+              onClick={onCloseRoom}
+              disabled={isClosingRoom}
+              className="text-[11px] font-medium text-[#e50914] disabled:opacity-50"
+            >
+              {isClosingRoom ? "Closing room…" : "Close room"}
+            </button>
+          </div>
+        )}
       </header>
 
       <RoomParticipantsMenu

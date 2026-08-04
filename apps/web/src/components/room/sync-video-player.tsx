@@ -3,8 +3,6 @@
 import { useEffect, useRef, useId, useCallback, useState } from "react";
 import {
   AlertCircle,
-  Play,
-  Pause,
   Maximize,
   Minimize,
   Settings2,
@@ -23,6 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { PauseMark, PlayMark } from "@/components/home/marks";
 
 interface SyncVideoPlayerProps {
   url: string;
@@ -457,7 +456,8 @@ export function SyncVideoPlayer({
     progressMax || 0,
   );
   const uiTime = seekValue ?? (isDirect ? directTime : isYoutube ? ytTime : (syncState?.time ?? 0));
-  const controlsVisible = controlsHovered || scrubbing || seekValue !== null;
+  const controlsVisible =
+    controlsHovered || scrubbing || seekValue !== null || !uiPlaying;
   const showProgress = (isDirect || isYoutube) && progressMax > 0;
 
   const handleContainerMouseLeave = useCallback(
@@ -496,13 +496,29 @@ export function SyncVideoPlayer({
         <div id={`yt-${playerId}`} className="absolute inset-0 h-full w-full" />
       )}
 
-      {isYoutube && playerReady && !broadcastEnded && (
-        <div
-          className="absolute inset-0 z-[15]"
-          aria-hidden
+      {(isYoutube || isDirect) && playerReady && !broadcastEnded && (
+        <button
+          type="button"
+          className={cn(
+            "absolute inset-0 z-[15] flex items-center justify-center bg-transparent",
+            !canControl && "cursor-default",
+          )}
+          aria-label={uiPlaying ? "Pause" : "Play"}
+          disabled={!canControl}
           onMouseEnter={() => setControlsHovered(true)}
           onTouchStart={() => setControlsHovered(true)}
-        />
+          onClick={() => {
+            if (!canControl) return;
+            setControlsHovered(true);
+            togglePlay();
+          }}
+        >
+          {!uiPlaying && canControl && (
+            <span className="pointer-events-none grid size-16 place-items-center bg-[#e50914] text-white shadow-[0_16px_48px_rgba(0,0,0,0.45)] transition group-hover/player:scale-105 sm:size-[4.5rem]">
+              <PlayMark className="ml-0.5 size-7 sm:size-8" />
+            </span>
+          )}
+        </button>
       )}
 
       {parsed.provider === "direct" && (
@@ -666,21 +682,24 @@ export function SyncVideoPlayer({
           <div className="flex items-center gap-2 sm:gap-3">
             <Button
               size="icon"
-              onClick={togglePlay}
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePlay();
+              }}
               disabled={!canControl}
               title={
                 canControl
                   ? uiPlaying
                     ? "Pause"
                     : "Play"
-                  : "Only host and admins can control playback"
+                  : "Join the room to control playback"
               }
-              className="size-9 shrink-0 rounded-full bg-white/10 text-white backdrop-blur-sm hover:bg-white/20 disabled:opacity-40 sm:size-10"
+              className="size-9 shrink-0 bg-white/10 text-white backdrop-blur-sm hover:bg-white/20 disabled:opacity-40 sm:size-10"
             >
               {uiPlaying ? (
-                <Pause className="size-4 fill-white sm:size-5" />
+                <PauseMark className="size-4 sm:size-5" />
               ) : (
-                <Play className="size-4 fill-white sm:size-5" />
+                <PlayMark className="ml-0.5 size-4 sm:size-5" />
               )}
             </Button>
 

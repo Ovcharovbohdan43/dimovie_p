@@ -39,6 +39,9 @@ const EXACT: Record<string, string> = {
   "User not found": "We couldn’t find that account.",
   "Empty message": "Write something before sending.",
   "Not a participant": "Join the room first to chat and watch together.",
+  "Only the host or admins can control playback":
+    "Join the room to control playback.",
+  "Join the room to control playback": "Join the room to control playback.",
   "Chat error": "Message couldn’t be sent. Try again.",
   "Catalog not loaded": "Load the title first, then pick an episode.",
   "No stream qualities found": "No playable quality found for this title.",
