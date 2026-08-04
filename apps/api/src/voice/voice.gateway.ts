@@ -7,6 +7,7 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
+import { Logger } from '@nestjs/common';
 import { Server } from 'socket.io';
 import { WS_ROOM_EVENTS } from '@dimovie/shared';
 import { getPlanCapabilities } from '@dimovie/shared';
@@ -16,11 +17,11 @@ import { VoiceService } from './voice.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { getCorsOptions } from '../common/cors';
 
-interface VoicePeer {
-  roomCode: string;
-  userId: string;
-  displayName: string;
-}
+type VoiceSocketData = {
+  voiceRoomCode?: string;
+  voiceUserId?: string;
+  voiceDisplayName?: string;
+};
 
 @WebSocketGateway({
   namespace: '/voice',
@@ -30,7 +31,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
 
-  private readonly peers = new Map<string, VoicePeer>();
+  private readonly logger = new Logger(VoiceGateway.name);
 
   constructor(
     private readonly voiceService: VoiceService,
@@ -46,12 +47,14 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  handleDisconnect(client: AuthedSocket) {
-    const peer = this.peers.get(client.id);
-    if (!peer) return;
+  async handleDisconnect(client: AuthedSocket) {
+    const data = client.data as VoiceSocketData;
+    const roomCode = data.voiceRoomCode;
+    if (!roomCode) return;
 
-    this.peers.delete(client.id);
-    this.broadcastPeerLists(peer.roomCode);
+    client.leave(`voice:${roomCode}`);
+    data.voiceRoomCode = undefined;
+    await this.emitPeerLists(roomCode);
   }
 
   @SubscribeMessage(WS_ROOM_EVENTS.VOICE_JOIN)
@@ -69,9 +72,9 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!room || room.status !== 'ACTIVE') return;
 
     const caps = getPlanCapabilities(room.owner.subscription);
-    const roomPeers = this.listPeers(roomCode);
+    const existingPeers = await this.listPeers(roomCode);
 
-    if (roomPeers.length >= caps.maxVoicePeers) {
+    if (existingPeers.length >= caps.maxVoicePeers) {
       client.emit(WS_ROOM_EVENTS.ERROR, {
         message: 'Voice channel is full for this plan',
         scope: 'voice',
@@ -79,17 +82,15 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    if (client.data.voiceRoomCode) {
-      client.leave(`voice:${client.data.voiceRoomCode}`);
+    const data = client.data as VoiceSocketData;
+    if (data.voiceRoomCode) {
+      client.leave(`voice:${data.voiceRoomCode}`);
     }
 
-    client.data.voiceRoomCode = roomCode;
+    data.voiceRoomCode = roomCode;
+    data.voiceUserId = client.user.id;
+    data.voiceDisplayName = client.user.displayName;
     client.join(`voice:${roomCode}`);
-    this.peers.set(client.id, {
-      roomCode,
-      userId: client.user.id,
-      displayName: client.user.displayName,
-    });
 
     const useSfu =
       caps.voiceMode === 'sfu' &&
@@ -102,11 +103,20 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       ? this.voiceService.getRouterCapabilities(roomCode)
       : null;
 
+    const iceServers = await this.voiceService.getIceServers(client.user.id);
+    const peers = (await this.listPeers(roomCode)).filter(
+      (p) => p.userId !== client.user!.id,
+    );
+
+    this.logger.log(
+      `voice join room=${roomCode} user=${client.user.id} peers=${peers.length} ice=${iceServers.length}`,
+    );
+
     client.emit(WS_ROOM_EVENTS.VOICE_PEERS, {
       mode: useSfu && transport ? 'sfu' : 'p2p',
       maxPeers: caps.maxVoicePeers,
       enhancedAudio: caps.enhancedVoice,
-      iceServers: this.voiceService.getIceServers(),
+      iceServers,
       routerRtpCapabilities: capsRtp,
       transport: transport
         ? {
@@ -116,59 +126,76 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
             dtlsParameters: transport.dtlsParameters,
           }
         : null,
-      peers: this.listPeers(roomCode).filter((p) => p.userId !== client.user.id),
+      peers,
     });
 
-    this.broadcastPeerLists(roomCode, client.id);
+    await this.emitPeerLists(roomCode, client.id);
   }
 
   @SubscribeMessage(WS_ROOM_EVENTS.VOICE_LEAVE)
-  onVoiceLeave(@ConnectedSocket() client: AuthedSocket) {
-    const peer = this.peers.get(client.id);
-    if (!peer) return;
+  async onVoiceLeave(@ConnectedSocket() client: AuthedSocket) {
+    const data = client.data as VoiceSocketData;
+    const roomCode = data.voiceRoomCode;
+    if (!roomCode) return;
 
-    this.peers.delete(client.id);
-    client.leave(`voice:${peer.roomCode}`);
-    client.data.voiceRoomCode = undefined;
+    client.leave(`voice:${roomCode}`);
+    data.voiceRoomCode = undefined;
+    data.voiceUserId = undefined;
+    data.voiceDisplayName = undefined;
 
-    this.broadcastPeerLists(peer.roomCode);
+    await this.emitPeerLists(roomCode);
   }
 
   @SubscribeMessage(WS_ROOM_EVENTS.VOICE_SIGNAL)
-  onVoiceSignal(
+  async onVoiceSignal(
     @ConnectedSocket() client: AuthedSocket,
     @MessageBody() body: { targetUserId: string; signal: unknown },
   ) {
     if (!client.user) return;
+    const data = client.data as VoiceSocketData;
+    const roomCode = data.voiceRoomCode;
+    if (!roomCode || !body.targetUserId) return;
 
-    for (const [socketId, peer] of this.peers.entries()) {
-      if (peer.userId === body.targetUserId) {
-        this.server.to(socketId).emit(WS_ROOM_EVENTS.VOICE_SIGNAL, {
-          fromUserId: client.user.id,
-          signal: body.signal,
-        });
-        return;
-      }
+    // Room broadcast works across Socket.IO Redis adapter replicas.
+    // Clients ignore signals not addressed to them.
+    client.to(`voice:${roomCode}`).emit(WS_ROOM_EVENTS.VOICE_SIGNAL, {
+      fromUserId: client.user.id,
+      targetUserId: body.targetUserId,
+      signal: body.signal,
+    });
+  }
+
+  private async listPeers(roomCode: string) {
+    const sockets = await this.server.in(`voice:${roomCode}`).fetchSockets();
+    const peers: { userId: string; displayName: string; socketId: string }[] =
+      [];
+    const seen = new Set<string>();
+
+    for (const sock of sockets) {
+      const data = sock.data as VoiceSocketData;
+      const userId = data.voiceUserId;
+      if (!userId || seen.has(userId)) continue;
+      seen.add(userId);
+      peers.push({
+        userId,
+        displayName: data.voiceDisplayName || 'Guest',
+        socketId: sock.id,
+      });
     }
+
+    return peers;
   }
 
-  private listPeers(roomCode: string) {
-    return [...this.peers.entries()]
-      .filter(([, peer]) => peer.roomCode === roomCode)
-      .map(([socketId, peer]) => ({
-        userId: peer.userId,
-        displayName: peer.displayName,
-        socketId,
-      }));
-  }
+  private async emitPeerLists(roomCode: string, exceptSocketId?: string) {
+    const sockets = await this.server.in(`voice:${roomCode}`).fetchSockets();
+    const allPeers = await this.listPeers(roomCode);
 
-  /** Each socket gets peers excluding itself — avoids self PeerConnections. */
-  private broadcastPeerLists(roomCode: string, exceptSocketId?: string) {
-    for (const [socketId, peer] of this.peers.entries()) {
-      if (peer.roomCode !== roomCode) continue;
-      if (exceptSocketId && socketId === exceptSocketId) continue;
-      this.server.to(socketId).emit(WS_ROOM_EVENTS.VOICE_PEERS, {
-        peers: this.listPeers(roomCode).filter((p) => p.userId !== peer.userId),
+    for (const sock of sockets) {
+      if (exceptSocketId && sock.id === exceptSocketId) continue;
+      const data = sock.data as VoiceSocketData;
+      const selfId = data.voiceUserId;
+      sock.emit(WS_ROOM_EVENTS.VOICE_PEERS, {
+        peers: allPeers.filter((p) => p.userId !== selfId),
       });
     }
   }

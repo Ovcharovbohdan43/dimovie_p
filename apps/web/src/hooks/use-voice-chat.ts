@@ -229,12 +229,15 @@ export function useVoiceChat({
     [],
   );
 
+  const iceRestartingRef = useRef<Set<string>>(new Set());
+
   const createPeerConnection = useCallback(
     async (targetUserId: string, initiator: boolean) => {
       if (peersRef.current.has(targetUserId)) return;
 
       const pc = new RTCPeerConnection({
         iceServers: iceServersRef.current,
+        iceCandidatePoolSize: 4,
       });
       peersRef.current.set(targetUserId, pc);
 
@@ -243,6 +246,8 @@ export function useVoiceChat({
         for (const track of localStream.getTracks()) {
           pc.addTrack(track, localStream);
         }
+      } else {
+        pc.addTransceiver("audio", { direction: "sendrecv" });
       }
 
       pc.ontrack = (event) => {
@@ -267,12 +272,42 @@ export function useVoiceChat({
       };
 
       pc.onconnectionstatechange = () => {
-        if (
-          pc.connectionState === "failed" ||
-          pc.connectionState === "closed"
-        ) {
-          cleanupPeer(targetUserId);
+        if (pc.connectionState === "connected") {
+          iceRestartingRef.current.delete(targetUserId);
+          resumeAllRemoteAudio(audioElsRef.current);
+          return;
         }
+
+        if (pc.connectionState === "closed") {
+          cleanupPeer(targetUserId);
+          return;
+        }
+
+        if (pc.connectionState !== "failed") return;
+        if (iceRestartingRef.current.has(targetUserId)) {
+          cleanupPeer(targetUserId);
+          return;
+        }
+
+        const localUserId = currentUserIdRef.current;
+        if (!localUserId || !shouldInitiateOffer(localUserId, targetUserId)) {
+          return;
+        }
+
+        iceRestartingRef.current.add(targetUserId);
+        void (async () => {
+          try {
+            pc.setConfiguration({ iceServers: iceServersRef.current });
+            const offer = await pc.createOffer({ iceRestart: true });
+            await pc.setLocalDescription(offer);
+            socketRef.current?.emit(WS_ROOM_EVENTS.VOICE_SIGNAL, {
+              targetUserId,
+              signal: { sdp: pc.localDescription },
+            });
+          } catch {
+            cleanupPeer(targetUserId);
+          }
+        })();
       };
 
       if (initiator) {
@@ -442,7 +477,15 @@ export function useVoiceChat({
 
       socket.on(
         WS_ROOM_EVENTS.VOICE_SIGNAL,
-        (payload: { fromUserId: string; signal: Record<string, unknown> }) => {
+        (payload: {
+          fromUserId: string;
+          targetUserId?: string;
+          signal: Record<string, unknown>;
+        }) => {
+          const me = currentUserIdRef.current;
+          if (payload.targetUserId && me && payload.targetUserId !== me) {
+            return;
+          }
           void handleSignal(payload.fromUserId, payload.signal);
         },
       );
