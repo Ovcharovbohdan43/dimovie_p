@@ -388,7 +388,7 @@ export function SyncVideoPlayer({
             onIntentRef.current("PLAY", el.currentTime);
           })
           .catch(() => {
-            setVideoError("Failed to start playback");
+            setVideoError("Couldn’t start the video. Try again.");
           });
       }
     } else {
@@ -546,7 +546,9 @@ export function SyncVideoPlayer({
           }}
           onError={() => {
             setVideoLoading(false);
-            setVideoError("Failed to load video. Try refreshing the page.");
+            setVideoError(
+              "The video didn’t load. Refresh the page or try another link.",
+            );
           }}
           onPlay={() => {
             setDirectPlaying(true);

@@ -30,7 +30,9 @@ export class AuthService {
       where: { email: dto.email.toLowerCase() },
     });
     if (existing) {
-      throw new ConflictException('Email already registered');
+      throw new ConflictException(
+        'This email is already registered. Sign in or use another email.',
+      );
     }
 
     const passwordHash = await argon2.hash(dto.password);
@@ -49,19 +51,26 @@ export class AuthService {
     const rateKey = `ratelimit:auth:${ip}`;
     const attempts = await this.redis.incrWithExpire(rateKey, 900);
     if (attempts > 5) {
-      throw new HttpException('Too many login attempts', HttpStatus.TOO_MANY_REQUESTS);
+      throw new HttpException(
+        'Too many tries. Wait a minute, then try again.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
 
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email.toLowerCase() },
     });
     if (!user || !user.passwordHash) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException(
+        'Wrong email or password. Check them and try again.',
+      );
     }
 
     const valid = await argon2.verify(user.passwordHash, dto.password);
     if (!valid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException(
+        'Wrong email or password. Check them and try again.',
+      );
     }
 
     await this.redis.client.del(rateKey);

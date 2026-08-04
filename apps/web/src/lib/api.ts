@@ -1,3 +1,5 @@
+import { toUserMessage } from "@/lib/user-message";
+
 function normalizeApiUrl(raw: string): string {
   let url = raw.trim();
   if (!/^https?:\/\//i.test(url)) {
@@ -24,6 +26,7 @@ export class ApiError extends Error {
     public status: number,
   ) {
     super(message);
+    this.name = "ApiError";
   }
 }
 
@@ -51,10 +54,23 @@ async function fetchApi(
   const maxAttempts = method === "GET" ? 3 : 1;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const res = await fetch(url, {
-      ...options,
-      credentials: "include",
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        ...options,
+        credentials: "include",
+      });
+    } catch (err) {
+      const canRetry = method === "GET" && attempt < maxAttempts - 1;
+      if (canRetry) {
+        await sleep(1200);
+        continue;
+      }
+      throw new ApiError(
+        toUserMessage(err instanceof Error ? err.message : null, 0),
+        0,
+      );
+    }
 
     if (res.ok) return res;
 
@@ -69,7 +85,17 @@ async function fetchApi(
     return res;
   }
 
-  throw new Error("fetchApi: unreachable");
+  throw new ApiError(toUserMessage(null, 503), 503);
+}
+
+async function readErrorPayload(res: Response): Promise<{
+  message?: string | string[];
+}> {
+  return res.json().catch(() => ({}));
+}
+
+function throwApiError(res: Response, body: { message?: string | string[] }): never {
+  throw new ApiError(toUserMessage(body.message ?? res.statusText, res.status), res.status);
 }
 
 export async function api<T>(
@@ -91,18 +117,7 @@ export async function api<T>(
   });
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    const message = (body as { message?: string | string[] }).message;
-    const text = Array.isArray(message) ? message.join(", ") : message;
-
-    if (res.status >= 500 && !text) {
-      throw new ApiError(
-        "API is temporarily unavailable. Wait a few seconds and refresh the page.",
-        res.status,
-      );
-    }
-
-    throw new ApiError(text ?? res.statusText, res.status);
+    throwApiError(res, await readErrorPayload(res));
   }
 
   return res.json() as Promise<T>;
@@ -121,10 +136,7 @@ export async function publicApi<T>(
   });
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    const message = (body as { message?: string | string[] }).message;
-    const text = Array.isArray(message) ? message.join(", ") : message;
-    throw new ApiError(text ?? res.statusText, res.status);
+    throwApiError(res, await readErrorPayload(res));
   }
 
   return res.json() as Promise<T>;

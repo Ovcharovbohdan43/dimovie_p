@@ -317,7 +317,10 @@ export function useVoiceChat({
       );
 
       socket.on(WS_ROOM_EVENTS.ERROR, (payload?: { message?: string }) => {
-        setError(payload?.message ?? "Voice connection failed");
+        setError(
+          payload?.message ??
+            "Couldn’t connect voice. Check your mic and try again.",
+        );
         cleanupAll();
       });
 
@@ -328,7 +331,9 @@ export function useVoiceChat({
       setConnected(true);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Microphone access denied",
+        err instanceof Error && /denied|notallowed|permission/i.test(err.message)
+          ? "Microphone access is blocked. Allow it in browser settings."
+          : "Couldn’t connect voice. Check your mic and try again.",
       );
       cleanupAll();
     }

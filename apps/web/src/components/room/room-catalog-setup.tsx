@@ -6,6 +6,7 @@ import { Loader2, Link2, Play } from "lucide-react";
 import type { CatalogInfo, CatalogStreamResult, RoomSummary } from "@dimovie/shared";
 import { normalizeCatalogInfo } from "@dimovie/shared";
 import { api } from "@/lib/api";
+import { toUserMessage } from "@/lib/user-message";
 import { parseVideoUrl } from "@/lib/video-url";
 import { blurSelectOnChange, catalogSelectClassName } from "@/lib/select-field";
 import { Button } from "@/components/ui/button";
@@ -166,7 +167,7 @@ export function RoomCatalogSetup({ roomId, onSuccess }: RoomCatalogSetupProps) {
 
           {parseCatalog.isError && (
             <p className="text-sm text-[#e50914]">
-              {(parseCatalog.error as Error).message}
+              {toUserMessage((parseCatalog.error as Error).message)}
             </p>
           )}
 

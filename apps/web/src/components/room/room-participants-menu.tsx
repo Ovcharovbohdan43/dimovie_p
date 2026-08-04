@@ -24,6 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { toUserMessage } from "@/lib/user-message";
 
 interface RoomParticipantsMenuProps {
   open: boolean;
@@ -78,7 +79,7 @@ export function RoomParticipantsMenu({
       setActionError(null);
     },
     onSettled: () => setPendingUserId(null),
-    onError: (err: Error) => setActionError(err.message),
+    onError: (err: Error) => setActionError(toUserMessage(err.message)),
   });
 
   const ban = useMutation({
@@ -92,7 +93,7 @@ export function RoomParticipantsMenu({
       setActionError(null);
     },
     onSettled: () => setPendingUserId(null),
-    onError: (err: Error) => setActionError(err.message),
+    onError: (err: Error) => setActionError(toUserMessage(err.message)),
   });
 
   const setRole = useMutation({
@@ -112,7 +113,7 @@ export function RoomParticipantsMenu({
       setActionError(null);
     },
     onSettled: () => setPendingUserId(null),
-    onError: (err: Error) => setActionError(err.message),
+    onError: (err: Error) => setActionError(toUserMessage(err.message)),
   });
 
   const handleKick = (userId: string, displayName: string) => {

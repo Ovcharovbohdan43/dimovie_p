@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { toUserMessage } from "@/lib/user-message";
 
 interface RoomGuestAuthModalProps {
   roomCode: string;
@@ -218,7 +219,9 @@ export function RoomGuestAuthModal({
         )}
 
         {error && (
-          <p className="text-center text-sm text-[#e50914]">{error.message}</p>
+          <p className="text-center text-sm text-[#e50914]">
+            {toUserMessage(error.message)}
+          </p>
         )}
       </DialogContent>
     </Dialog>

@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { API_URL } from "@/lib/api";
+import { toUserMessage } from "@/lib/user-message";
 import { CinematicShell } from "@/components/layout/cinematic-shell";
 import { LoadingScreen } from "@/components/ui/loading-spinner";
 
@@ -87,7 +88,9 @@ function LoginForm() {
           </div>
 
           {login.error && (
-            <p className="text-sm text-[#e50914]">{login.error.message}</p>
+            <p className="text-sm text-[#e50914]">
+              {toUserMessage(login.error.message)}
+            </p>
           )}
 
           <Button

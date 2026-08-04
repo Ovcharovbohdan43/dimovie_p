@@ -64,6 +64,7 @@ import {
 import { RoomGuestAuthModal } from "@/components/room/room-guest-auth-modal";
 
 import { RoomPreviewTheater } from "@/components/room/room-preview-theater";
+import { toUserMessage } from "@/lib/user-message";
 
 
 
@@ -215,7 +216,7 @@ export default function RoomPage({
 
     onError: (err: Error) => {
 
-      setJoinError(err.message);
+      setJoinError(toUserMessage(err.message));
 
     },
 
@@ -576,7 +577,9 @@ export default function RoomPage({
         <p className="relative font-display text-2xl font-bold tracking-[-0.04em] text-[#e50914]">
           DiMovie
         </p>
-        <p className="relative text-[#e50914]">Room not found or link is invalid</p>
+        <p className="relative text-[#e50914]">
+          This room doesn’t exist or the link is no longer valid.
+        </p>
         <Button
           className="relative bg-white font-semibold text-black hover:bg-white/90"
           onClick={() => router.push("/")}
@@ -661,7 +664,7 @@ export default function RoomPage({
         </p>
         <p className="relative text-[#e50914]">
 
-          {joinError ?? "Could not join room"}
+          {joinError ?? "Couldn’t join the room. Check the code and try again."}
 
         </p>
 
@@ -797,7 +800,7 @@ export default function RoomPage({
 
                       <p className="text-sm text-[#e50914]">
 
-                        {(setVideo.error as Error).message}
+                        {toUserMessage((setVideo.error as Error).message)}
 
                       </p>
 

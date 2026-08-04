@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CinematicShell } from "@/components/layout/cinematic-shell";
+import { toUserMessage } from "@/lib/user-message";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -87,7 +88,9 @@ export default function RegisterPage() {
           </div>
 
           {registerUser.error && (
-            <p className="text-sm text-[#e50914]">{registerUser.error.message}</p>
+            <p className="text-sm text-[#e50914]">
+              {toUserMessage(registerUser.error.message)}
+            </p>
           )}
 
           <Button
