@@ -9,9 +9,11 @@ interface VoiceControlsProps {
   muted: boolean;
   peerCount: number;
   error?: string | null;
+  needsAudioUnlock?: boolean;
   onJoin: () => void;
   onLeave: () => void;
   onToggleMute: () => void;
+  onUnlockAudio?: () => void;
   className?: string;
   compact?: boolean;
 }
@@ -21,9 +23,11 @@ export function VoiceControls({
   muted,
   peerCount,
   error,
+  needsAudioUnlock = false,
   onJoin,
   onLeave,
   onToggleMute,
+  onUnlockAudio,
   className,
   compact = false,
 }: VoiceControlsProps) {
@@ -43,6 +47,16 @@ export function VoiceControls({
             >
               <MicMark className="size-3.5" />
             </button>
+            {needsAudioUnlock && onUnlockAudio ? (
+              <button
+                type="button"
+                onClick={onUnlockAudio}
+                title="Tap to hear others"
+                className="h-8 px-2 text-[11px] font-medium text-[#e50914] hover:bg-[#e50914]/10"
+              >
+                Tap to hear
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onLeave}
@@ -91,6 +105,17 @@ export function VoiceControls({
             <MicMark className={cn("mr-1.5 size-3.5", muted && "text-[#e50914]")} />
             {muted ? "Unmute" : "Mute"}
           </Button>
+          {needsAudioUnlock && onUnlockAudio ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onUnlockAudio}
+              className="h-8 border-[#e50914]/40 bg-[#e50914]/10 text-xs text-[#e50914]"
+            >
+              Tap to hear
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="sm"

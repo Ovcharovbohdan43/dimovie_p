@@ -789,9 +789,11 @@ export default function RoomPage({
                 muted={voice.muted}
                 peerCount={voice.voicePeers?.length ?? 0}
                 error={voice.error}
+                needsAudioUnlock={voice.needsAudioUnlock}
                 onJoin={voice.joinVoice}
                 onLeave={voice.leaveVoice}
                 onToggleMute={voice.toggleMute}
+                onUnlockAudio={voice.unlockRemoteAudio}
               />
             ) : null
           }

@@ -15,6 +15,8 @@ const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun1.l.google.com:19302" },
 ];
 
+const REMOTE_AUDIO_ROOT_ID = "dimovie-voice-remote";
+
 function toRtcIceServers(servers?: VoiceIceServer[]): RTCIceServer[] {
   if (!servers?.length) return DEFAULT_ICE_SERVERS;
   return servers.map((s) => ({
@@ -70,6 +72,98 @@ function parseSessionDescription(
   return null;
 }
 
+function getRemoteAudioRoot(): HTMLElement {
+  let root = document.getElementById(REMOTE_AUDIO_ROOT_ID);
+  if (!root) {
+    root = document.createElement("div");
+    root.id = REMOTE_AUDIO_ROOT_ID;
+    root.setAttribute("aria-hidden", "true");
+    root.style.cssText =
+      "position:fixed;width:0;height:0;opacity:0;pointer-events:none;overflow:hidden;";
+    document.body.appendChild(root);
+  }
+  return root;
+}
+
+/**
+ * iOS Safari / mobile WebViews block remote WebRTC audio unless the element is
+ * in the DOM and play() runs after capture (or a user gesture).
+ */
+async function unlockAudioPlayback(): Promise<void> {
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (
+        window as unknown as {
+          webkitAudioContext?: typeof AudioContext;
+        }
+      ).webkitAudioContext;
+    if (!AudioCtx) return;
+
+    const ctx = new AudioCtx();
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+    const buffer = ctx.createBuffer(1, 1, 22050);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.start(0);
+    window.setTimeout(() => {
+      void ctx.close().catch(() => undefined);
+    }, 400);
+  } catch {
+    /* unlock is best-effort */
+  }
+}
+
+function playRemoteAudio(audio: HTMLAudioElement) {
+  audio.muted = false;
+  audio.volume = 1;
+  const result = audio.play();
+  if (result !== undefined) {
+    void result.catch(() => {
+      /* Autoplay may still block until the next gesture; resumeAllRemoteAudio covers that. */
+    });
+  }
+}
+
+function attachRemoteAudio(
+  userId: string,
+  stream: MediaStream,
+  audioEls: Map<string, HTMLAudioElement>,
+) {
+  let audio = audioEls.get(userId);
+  if (!audio) {
+    audio = document.createElement("audio");
+    audio.autoplay = true;
+    audio.setAttribute("playsinline", "true");
+    audio.setAttribute("webkit-playsinline", "true");
+    audio.preload = "auto";
+    getRemoteAudioRoot().appendChild(audio);
+    audioEls.set(userId, audio);
+  }
+
+  if (audio.srcObject !== stream) {
+    audio.srcObject = stream;
+  }
+
+  playRemoteAudio(audio);
+
+  for (const track of stream.getAudioTracks()) {
+    track.onunmute = () => playRemoteAudio(audio!);
+    track.onmute = () => {
+      /* keep element; track may unmute again */
+    };
+  }
+}
+
+function resumeAllRemoteAudio(audioEls: Map<string, HTMLAudioElement>) {
+  for (const audio of audioEls.values()) {
+    playRemoteAudio(audio);
+  }
+}
+
 export function useVoiceChat({
   roomCode,
   token,
@@ -95,6 +189,7 @@ export function useVoiceChat({
   const [muted, setMuted] = useState(false);
   const [voicePeers, setVoicePeers] = useState<VoicePeerInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
 
   const cleanupPeer = useCallback((userId: string) => {
     peersRef.current.get(userId)?.close();
@@ -115,6 +210,7 @@ export function useVoiceChat({
     socketRef.current = null;
     setConnected(false);
     setVoicePeers([]);
+    setNeedsAudioUnlock(false);
     pendingCandidatesRef.current.clear();
   }, [cleanupPeer]);
 
@@ -150,10 +246,16 @@ export function useVoiceChat({
       }
 
       pc.ontrack = (event) => {
-        const audio = audioElsRef.current.get(targetUserId) ?? new Audio();
-        audio.autoplay = true;
-        audio.srcObject = event.streams[0] ?? null;
-        audioElsRef.current.set(targetUserId, audio);
+        const stream =
+          event.streams[0] ?? new MediaStream([event.track]);
+        attachRemoteAudio(targetUserId, stream, audioElsRef.current);
+
+        const playAttempt = audioElsRef.current.get(targetUserId);
+        if (playAttempt) {
+          void playAttempt.play().catch(() => {
+            setNeedsAudioUnlock(true);
+          });
+        }
       };
 
       pc.onicecandidate = (event) => {
@@ -162,6 +264,15 @@ export function useVoiceChat({
           targetUserId,
           signal: { candidate: event.candidate.toJSON() },
         });
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (
+          pc.connectionState === "failed" ||
+          pc.connectionState === "closed"
+        ) {
+          cleanupPeer(targetUserId);
+        }
       };
 
       if (initiator) {
@@ -173,13 +284,13 @@ export function useVoiceChat({
         });
       }
     },
-    [],
+    [cleanupPeer],
   );
 
   const handleSignal = useCallback(
     async (fromUserId: string, signal: Record<string, unknown>) => {
       const localUserId = currentUserIdRef.current;
-      if (!localUserId) return;
+      if (!localUserId || fromUserId === localUserId) return;
 
       try {
         if (signal.candidate) {
@@ -231,7 +342,14 @@ export function useVoiceChat({
             pc.signalingState === "have-local-offer" &&
             isPolitePeer(localUserId, fromUserId)
           ) {
-            await pc.setLocalDescription({ type: "rollback" });
+            try {
+              await pc.setLocalDescription({ type: "rollback" });
+            } catch {
+              cleanupPeer(fromUserId);
+              await createPeerConnection(fromUserId, false);
+              pc = peersRef.current.get(fromUserId);
+              if (!pc) return;
+            }
           }
 
           await pc.setRemoteDescription(description);
@@ -242,6 +360,7 @@ export function useVoiceChat({
             signal: { sdp: pc.localDescription },
           });
           await flushPendingCandidates(fromUserId, pc);
+          resumeAllRemoteAudio(audioElsRef.current);
           return;
         }
 
@@ -251,6 +370,7 @@ export function useVoiceChat({
           }
           await pc.setRemoteDescription(description);
           await flushPendingCandidates(fromUserId, pc);
+          resumeAllRemoteAudio(audioElsRef.current);
         }
       } catch {
         cleanupPeer(fromUserId);
@@ -262,18 +382,23 @@ export function useVoiceChat({
   const joinVoice = useCallback(async () => {
     if (!enabled || !token || connected) return;
     setError(null);
+    setNeedsAudioUnlock(false);
+    void enhancedAudio;
 
     try {
+      // Avoid forced channelCount/stereo — breaks getUserMedia on some iOS devices.
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
-          noiseSuppression: enhancedAudio,
-          autoGainControl: enhancedAudio,
-          channelCount: enhancedAudio ? 2 : 1,
+          noiseSuppression: true,
+          autoGainControl: true,
         },
         video: false,
       });
       localStreamRef.current = stream;
+
+      // Capture + silent AudioContext unlock lets iOS autoplay remote MediaStreams.
+      await unlockAudioPlayback();
 
       const { wsUrl } = await getRuntimeConfig();
       const socket = io(`${wsUrl}/voice`, {
@@ -293,7 +418,10 @@ export function useVoiceChat({
           const ice = extractIceServers(payload);
           if (ice) iceServersRef.current = ice;
 
-          const peers = extractVoicePeers(payload);
+          const localUserId = currentUserIdRef.current;
+          const peers = extractVoicePeers(payload).filter(
+            (p) => p.userId !== localUserId,
+          );
           setVoicePeers(peers);
 
           const activeIds = new Set(peers.map((p) => p.userId));
@@ -301,13 +429,14 @@ export function useVoiceChat({
             if (!activeIds.has(userId)) cleanupPeer(userId);
           }
 
-          const localUserId = currentUserIdRef.current;
           for (const peer of peers) {
             if (peersRef.current.has(peer.userId)) continue;
             if (!localUserId) continue;
             const initiator = shouldInitiateOffer(localUserId, peer.userId);
             await createPeerConnection(peer.userId, initiator);
           }
+
+          resumeAllRemoteAudio(audioElsRef.current);
         },
       );
 
@@ -355,6 +484,12 @@ export function useVoiceChat({
     cleanupAll();
   }, [cleanupAll]);
 
+  const unlockRemoteAudio = useCallback(async () => {
+    await unlockAudioPlayback();
+    resumeAllRemoteAudio(audioElsRef.current);
+    setNeedsAudioUnlock(false);
+  }, []);
+
   const toggleMute = useCallback(() => {
     const stream = localStreamRef.current;
     if (!stream) return;
@@ -363,7 +498,19 @@ export function useVoiceChat({
       track.enabled = !next;
     });
     setMuted(next);
-  }, [muted]);
+    // Mute/unmute is a user gesture — retry remote playback (critical on iOS).
+    void unlockRemoteAudio();
+  }, [muted, unlockRemoteAudio]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "visible" && connected) {
+        resumeAllRemoteAudio(audioElsRef.current);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [connected]);
 
   useEffect(() => () => cleanupAll(), [cleanupAll]);
 
@@ -372,8 +519,10 @@ export function useVoiceChat({
     muted,
     voicePeers,
     error,
+    needsAudioUnlock,
     joinVoice,
     leaveVoice,
     toggleMute,
+    unlockRemoteAudio,
   };
 }

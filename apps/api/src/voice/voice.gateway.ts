@@ -51,9 +51,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!peer) return;
 
     this.peers.delete(client.id);
-    client
-      .to(`voice:${peer.roomCode}`)
-      .emit(WS_ROOM_EVENTS.VOICE_PEERS, { peers: this.listPeers(peer.roomCode) });
+    this.broadcastPeerLists(peer.roomCode);
   }
 
   @SubscribeMessage(WS_ROOM_EVENTS.VOICE_JOIN)
@@ -121,9 +119,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
       peers: this.listPeers(roomCode).filter((p) => p.userId !== client.user.id),
     });
 
-    client
-      .to(`voice:${roomCode}`)
-      .emit(WS_ROOM_EVENTS.VOICE_PEERS, { peers: this.listPeers(roomCode) });
+    this.broadcastPeerLists(roomCode, client.id);
   }
 
   @SubscribeMessage(WS_ROOM_EVENTS.VOICE_LEAVE)
@@ -135,9 +131,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.leave(`voice:${peer.roomCode}`);
     client.data.voiceRoomCode = undefined;
 
-    client
-      .to(`voice:${peer.roomCode}`)
-      .emit(WS_ROOM_EVENTS.VOICE_PEERS, { peers: this.listPeers(peer.roomCode) });
+    this.broadcastPeerLists(peer.roomCode);
   }
 
   @SubscribeMessage(WS_ROOM_EVENTS.VOICE_SIGNAL)
@@ -166,5 +160,16 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
         displayName: peer.displayName,
         socketId,
       }));
+  }
+
+  /** Each socket gets peers excluding itself — avoids self PeerConnections. */
+  private broadcastPeerLists(roomCode: string, exceptSocketId?: string) {
+    for (const [socketId, peer] of this.peers.entries()) {
+      if (peer.roomCode !== roomCode) continue;
+      if (exceptSocketId && socketId === exceptSocketId) continue;
+      this.server.to(socketId).emit(WS_ROOM_EVENTS.VOICE_PEERS, {
+        peers: this.listPeers(roomCode).filter((p) => p.userId !== peer.userId),
+      });
+    }
   }
 }
