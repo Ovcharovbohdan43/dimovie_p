@@ -39,8 +39,8 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-# Do NOT hardcode PORT — Railway injects it (often 8080)
-ENV HOSTNAME=0.0.0.0
+# Do NOT set HOSTNAME — Railway overwrites it with the container name.
+# Do NOT hardcode PORT — Railway injects it.
 
 COPY --from=builder /app/package.json /app/package-lock.json ./
 COPY --from=builder /app/node_modules ./node_modules
