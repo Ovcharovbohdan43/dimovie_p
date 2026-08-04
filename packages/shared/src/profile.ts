@@ -26,4 +26,6 @@ export interface WatchHistoryItem {
   watchedAt: string;
   duration: number;
   roomId: string | null;
+  /** Present when the original room is still ACTIVE and can be rejoined. */
+  roomCode: string | null;
 }

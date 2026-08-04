@@ -34,6 +34,27 @@ export class ProfilesService {
       orderBy: { watchedAt: 'desc' },
       take: 50,
     });
+
+    const roomIds = [
+      ...new Set(
+        items
+          .map((i) => i.roomId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
+    ];
+
+    const activeRooms =
+      roomIds.length === 0
+        ? []
+        : await this.prisma.room.findMany({
+            where: { id: { in: roomIds }, status: 'ACTIVE' },
+            select: { id: true, roomCode: true },
+          });
+
+    const roomCodeById = new Map(
+      activeRooms.map((room) => [room.id, room.roomCode] as const),
+    );
+
     return items.map((i) => ({
       id: i.id,
       title: i.title,
@@ -42,6 +63,7 @@ export class ProfilesService {
       watchedAt: i.watchedAt.toISOString(),
       duration: i.duration,
       roomId: i.roomId,
+      roomCode: i.roomId ? (roomCodeById.get(i.roomId) ?? null) : null,
     }));
   }
 

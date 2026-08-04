@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, Suspense } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
@@ -70,6 +71,47 @@ function DashboardContent() {
       qc.invalidateQueries({ queryKey: ["rooms"] });
       setOpen(false);
       router.push(`/room/${room.roomCode}`);
+    },
+  });
+
+  const [resumingId, setResumingId] = useState<string | null>(null);
+
+  const resumeWatching = useMutation({
+    mutationFn: async (item: WatchHistoryItem) => {
+      if (item.roomCode) {
+        return item.roomCode;
+      }
+
+      const room = await api<RoomSummary>("/rooms", {
+        method: "POST",
+        body: JSON.stringify({ privacy: "PRIVATE" }),
+      });
+
+      if (item.videoUrl) {
+        await api(`/rooms/${room.id}/video`, {
+          method: "POST",
+          body: JSON.stringify({
+            type: "EMBED",
+            url: item.videoUrl,
+            metadata: {
+              title: item.title,
+              ...(item.thumbnail ? { thumbnail: item.thumbnail } : {}),
+            },
+          }),
+        });
+      }
+
+      return room.roomCode;
+    },
+    onMutate: (item) => {
+      setResumingId(item.id);
+    },
+    onSuccess: (roomCode) => {
+      qc.invalidateQueries({ queryKey: ["rooms"] });
+      router.push(`/room/${roomCode}`);
+    },
+    onSettled: () => {
+      setResumingId(null);
     },
   });
 
@@ -230,27 +272,70 @@ function DashboardContent() {
             history.data &&
             history.data.length > 0 && (
               <ContentRow title="Continue watching">
-                {history.data.map((item) => (
-                  <motion.div
-                    key={item.id}
-                    className="w-[72vw] max-w-[280px] flex-shrink-0 snap-start overflow-hidden bg-[#121218] sm:w-[240px]"
-                    whileHover={{ y: -3 }}
-                    transition={{ type: "spring", stiffness: 420, damping: 28 }}
-                  >
-                    <div className="media-frame-ltr relative aspect-video">
-                      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_20%,rgba(229,9,20,0.2),transparent_55%),linear-gradient(160deg,#1c1c24,#0e0e14)]" />
-                      <div className="media-edge-wash absolute inset-0" />
-                      <div className="absolute inset-x-0 bottom-0 p-3.5">
-                        <p className="truncate font-display text-sm font-semibold tracking-[-0.01em]">
-                          {item.title}
-                        </p>
-                        <p className="mt-1 text-xs text-white/40">
-                          {new Date(item.watchedAt).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
+                {history.data.map((item) => {
+                  const canResume = Boolean(item.roomCode || item.videoUrl);
+                  const busy = resumingId === item.id;
+
+                  return (
+                    <motion.div
+                      key={item.id}
+                      className="w-[72vw] max-w-[280px] flex-shrink-0 snap-start sm:w-[240px]"
+                      whileHover={canResume ? { y: -3 } : undefined}
+                      transition={{ type: "spring", stiffness: 420, damping: 28 }}
+                    >
+                      <button
+                        type="button"
+                        disabled={!canResume || busy || resumeWatching.isPending}
+                        onClick={() => {
+                          if (!canResume || busy) return;
+                          resumeWatching.mutate(item);
+                        }}
+                        className="group relative block w-full overflow-hidden bg-[#121218] text-left outline-none ring-offset-2 ring-offset-[#08080c] transition focus-visible:ring-2 focus-visible:ring-[#e50914] disabled:cursor-not-allowed disabled:opacity-60"
+                        aria-label={
+                          item.roomCode
+                            ? `Rejoin ${item.title}`
+                            : `Continue watching ${item.title}`
+                        }
+                      >
+                        <div className="media-frame-ltr relative aspect-video">
+                          {item.thumbnail ? (
+                            <Image
+                              src={item.thumbnail}
+                              alt=""
+                              fill
+                              unoptimized
+                              sizes="(max-width: 640px) 72vw, 240px"
+                              className="object-cover transition duration-500 group-hover:scale-[1.04]"
+                            />
+                          ) : (
+                            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_20%,rgba(229,9,20,0.2),transparent_55%),linear-gradient(160deg,#1c1c24,#0e0e14)]" />
+                          )}
+                          <div className="media-edge-wash absolute inset-0" />
+                          <div className="absolute inset-0 flex items-center justify-center opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
+                            <span className="grid size-11 place-items-center bg-[#e50914] text-white shadow-lg">
+                              <PlayMark className="size-4" />
+                            </span>
+                          </div>
+                          {busy && (
+                            <div className="absolute inset-0 grid place-items-center bg-black/55 text-xs font-medium text-white">
+                              Opening…
+                            </div>
+                          )}
+                          <div className="absolute inset-x-0 bottom-0 p-3.5">
+                            <p className="truncate font-display text-sm font-semibold tracking-[-0.01em] text-white">
+                              {item.title}
+                            </p>
+                            <p className="mt-1 text-xs text-white/40">
+                              {item.roomCode
+                                ? `Room ${item.roomCode} · ${new Date(item.watchedAt).toLocaleDateString()}`
+                                : new Date(item.watchedAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    </motion.div>
+                  );
+                })}
               </ContentRow>
             )
           )}
