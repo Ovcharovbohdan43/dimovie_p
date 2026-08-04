@@ -8,7 +8,7 @@ import type {
   VoiceJoinPayload,
   VoicePeerInfo,
 } from "@dimovie/shared";
-import { API_URL } from "@/lib/api";
+import { WS_URL } from "@/lib/api";
 
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
@@ -275,7 +275,7 @@ export function useVoiceChat({
       });
       localStreamRef.current = stream;
 
-      const socket = io(`${API_URL}/voice`, {
+      const socket = io(`${WS_URL}/voice`, {
         auth: { token },
         transports: ["websocket", "polling"],
       });

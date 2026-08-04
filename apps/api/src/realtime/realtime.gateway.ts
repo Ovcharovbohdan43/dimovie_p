@@ -20,10 +20,11 @@ import { ModerationService } from '../moderation/moderation.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { getCorsOrigins } from '../common/cors';
 
 @WebSocketGateway({
   cors: {
-    origin: process.env.CORS_ORIGIN?.split(',') ?? ['http://localhost:3000'],
+    origin: getCorsOrigins(),
     credentials: true,
   },
   transports: ['websocket', 'polling'],
@@ -207,8 +208,12 @@ export class RealtimeGateway
           break;
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Chat error';
+      this.logger.warn(
+        `chat:message failed room=${client.roomCode} user=${client.user?.id}: ${message}`,
+      );
       client.emit(WS_ROOM_EVENTS.ERROR, {
-        message: err instanceof Error ? err.message : 'Chat error',
+        message,
         scope: 'chat',
       });
     }

@@ -4,6 +4,8 @@ import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { getCorsOrigins } from './common/cors';
+import { RedisIoAdapter } from './realtime/redis-io.adapter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -16,12 +18,16 @@ async function bootstrap() {
   if (!Number.isFinite(port) || port <= 0) {
     throw new Error(`Invalid PORT: ${process.env.PORT}`);
   }
-  const corsOrigin = config.get<string>('CORS_ORIGIN', 'http://localhost:3000');
+
+  const redisUrl = config.get<string>('REDIS_URL', 'redis://localhost:6379');
+  const redisIoAdapter = new RedisIoAdapter(app, redisUrl);
+  await redisIoAdapter.connectToRedis();
+  app.useWebSocketAdapter(redisIoAdapter);
 
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(cookieParser());
   app.enableCors({
-    origin: corsOrigin.split(',').map((o) => o.trim()),
+    origin: getCorsOrigins(),
     credentials: true,
   });
   app.useGlobalPipes(

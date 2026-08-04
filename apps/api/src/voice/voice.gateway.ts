@@ -14,6 +14,7 @@ import type { AuthedSocket } from '../realtime/ws-auth.service';
 import { WsAuthService } from '../realtime/ws-auth.service';
 import { VoiceService } from './voice.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { getCorsOrigins } from '../common/cors';
 
 interface VoicePeer {
   roomCode: string;
@@ -24,7 +25,7 @@ interface VoicePeer {
 @WebSocketGateway({
   namespace: '/voice',
   cors: {
-    origin: process.env.CORS_ORIGIN?.split(',') ?? ['http://localhost:3000'],
+    origin: getCorsOrigins(),
     credentials: true,
   },
 })

@@ -9,7 +9,7 @@ import type {
   ChatMessagePayload,
   RoomParticipant,
 } from "@dimovie/shared";
-import { API_URL } from "@/lib/api";
+import { API_URL, WS_URL } from "@/lib/api";
 
 interface Participant extends RoomParticipant {}
 
@@ -37,11 +37,12 @@ interface UseRoomSocketOptions {
   onRemoved?: (payload: RemovedPayload) => void;
   onRoomClosed?: (payload: { message: string }) => void;
   onChatCooldown?: (waitSeconds: number) => void;
+  onChatError?: (message: string) => void;
 }
 
 function getSocketUrl(): string {
   if (typeof window === "undefined") return API_URL;
-  return API_URL;
+  return WS_URL || API_URL;
 }
 
 export function useRoomSocket({
@@ -56,17 +57,45 @@ export function useRoomSocket({
   onRemoved,
   onRoomClosed,
   onChatCooldown,
+  onChatError,
 }: UseRoomSocketOptions) {
   const socketRef = useRef<Socket | null>(null);
+  const roomJoinedRef = useRef(false);
   const [connected, setConnected] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [roomJoined, setRoomJoined] = useState(false);
   const [chatCooldown, setChatCooldown] = useState(0);
   const chatCooldownRef = useRef(0);
 
+  const onSyncStateRef = useRef(onSyncState);
+  const onChatMessageRef = useRef(onChatMessage);
+  const onParticipantsRef = useRef(onParticipants);
+  const onReactionRef = useRef(onReaction);
+  const onJoinedRef = useRef(onJoined);
+  const onRemovedRef = useRef(onRemoved);
+  const onRoomClosedRef = useRef(onRoomClosed);
+  const onChatCooldownRef = useRef(onChatCooldown);
+  const onChatErrorRef = useRef(onChatError);
+
+  useEffect(() => {
+    onSyncStateRef.current = onSyncState;
+    onChatMessageRef.current = onChatMessage;
+    onParticipantsRef.current = onParticipants;
+    onReactionRef.current = onReaction;
+    onJoinedRef.current = onJoined;
+    onRemovedRef.current = onRemoved;
+    onRoomClosedRef.current = onRoomClosed;
+    onChatCooldownRef.current = onChatCooldown;
+    onChatErrorRef.current = onChatError;
+  });
+
   useEffect(() => {
     chatCooldownRef.current = chatCooldown;
   }, [chatCooldown]);
+
+  useEffect(() => {
+    roomJoinedRef.current = roomJoined;
+  }, [roomJoined]);
 
   useEffect(() => {
     if (chatCooldown <= 0) return;
@@ -91,12 +120,14 @@ export function useRoomSocket({
     if (!enabled || !token) {
       setConnected(false);
       setRoomJoined(false);
+      roomJoinedRef.current = false;
       return;
     }
 
     const socket = io(getSocketUrl(), {
       transports: ["polling", "websocket"],
       auth: { token },
+      withCredentials: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 500,
@@ -112,6 +143,12 @@ export function useRoomSocket({
     socket.on("disconnect", () => {
       setConnected(false);
       setRoomJoined(false);
+      roomJoinedRef.current = false;
+      setReconnecting(true);
+    });
+
+    socket.on("connect_error", (err) => {
+      console.warn("[room-socket] connect_error:", err.message);
       setReconnecting(true);
     });
 
@@ -122,27 +159,28 @@ export function useRoomSocket({
 
     socket.on(WS_ROOM_EVENTS.JOINED, (payload: JoinedPayload) => {
       setRoomJoined(true);
+      roomJoinedRef.current = true;
       setReconnecting(false);
-      if (payload.syncState) onSyncState?.(payload.syncState);
-      if (payload.participants) onParticipants?.(payload.participants);
-      onJoined?.(payload);
+      if (payload.syncState) onSyncStateRef.current?.(payload.syncState);
+      if (payload.participants) onParticipantsRef.current?.(payload.participants);
+      onJoinedRef.current?.(payload);
     });
 
     socket.on(WS_ROOM_EVENTS.SYNC_STATE, (state: SyncStatePayload) => {
-      onSyncState?.(state);
+      onSyncStateRef.current?.(state);
     });
 
     socket.on(WS_ROOM_EVENTS.CHAT_MESSAGE, (msg: ChatMessagePayload) => {
-      onChatMessage?.(msg);
+      onChatMessageRef.current?.(msg);
     });
 
     socket.on(WS_ROOM_EVENTS.CHAT_COOLDOWN, (payload: { waitSeconds: number }) => {
       applyChatCooldown(payload.waitSeconds);
-      onChatCooldown?.(payload.waitSeconds);
+      onChatCooldownRef.current?.(payload.waitSeconds);
     });
 
     socket.on(WS_ROOM_EVENTS.PARTICIPANTS, (participants: Participant[]) => {
-      onParticipants?.(participants);
+      onParticipantsRef.current?.(participants);
     });
 
     socket.on(WS_ROOM_EVENTS.REACTION, (data: {
@@ -150,15 +188,15 @@ export function useRoomSocket({
       displayName: string;
       emoji: string;
     }) => {
-      onReaction?.(data);
+      onReactionRef.current?.(data);
     });
 
     socket.on(WS_ROOM_EVENTS.REMOVED, (payload: RemovedPayload) => {
-      onRemoved?.(payload);
+      onRemovedRef.current?.(payload);
     });
 
     socket.on(WS_ROOM_EVENTS.CLOSED, (payload: { message: string }) => {
-      onRoomClosed?.(payload);
+      onRoomClosedRef.current?.(payload);
     });
 
     socket.on(WS_ROOM_EVENTS.ERROR, (payload?: { message?: string; scope?: string }) => {
@@ -167,14 +205,15 @@ export function useRoomSocket({
         payload?.scope === "chat" ||
         /wait.*seconds|rate limit|Empty message|Chat error/i.test(message);
       if (isChatError) {
+        if (message) onChatErrorRef.current?.(message);
         return;
       }
 
       setRoomJoined(false);
-      const blocked =
-        /blocked|banned|Not a participant/i.test(message);
+      roomJoinedRef.current = false;
+      const blocked = /blocked|banned|Not a participant/i.test(message);
       if (blocked) {
-        onRemoved?.({
+        onRemovedRef.current?.({
           action: /banned|blocked/i.test(message) ? "banned" : "kicked",
           message:
             message === "You are blocked by the host"
@@ -195,22 +234,9 @@ export function useRoomSocket({
       socketRef.current = null;
       setConnected(false);
       setRoomJoined(false);
+      roomJoinedRef.current = false;
     };
-  }, [
-    enabled,
-    token,
-    roomCode,
-    emitJoin,
-    onSyncState,
-    onChatMessage,
-    onParticipants,
-    onReaction,
-    onJoined,
-    onRemoved,
-    onRoomClosed,
-    onChatCooldown,
-    applyChatCooldown,
-  ]);
+  }, [enabled, token, roomCode, emitJoin, applyChatCooldown]);
 
   const sendSyncIntent = useCallback((intent: Omit<SyncIntentPayload, "clientTs">) => {
     socketRef.current?.emit(WS_ROOM_EVENTS.SYNC_INTENT, {
@@ -219,11 +245,20 @@ export function useRoomSocket({
     });
   }, []);
 
-  const sendChat = useCallback((content: string) => {
-    if (chatCooldownRef.current > 0) return;
-    socketRef.current?.emit(WS_ROOM_EVENTS.CHAT_MESSAGE, { content });
-    applyChatCooldown(Math.ceil(CHAT_MIN_INTERVAL_MS / 1000));
-  }, [applyChatCooldown]);
+  const sendChat = useCallback(
+    (content: string): boolean => {
+      if (chatCooldownRef.current > 0) return false;
+      const socket = socketRef.current;
+      if (!socket?.connected || !roomJoinedRef.current) {
+        onChatErrorRef.current?.("Not connected to the room yet");
+        return false;
+      }
+      socket.emit(WS_ROOM_EVENTS.CHAT_MESSAGE, { content });
+      applyChatCooldown(Math.ceil(CHAT_MIN_INTERVAL_MS / 1000));
+      return true;
+    },
+    [applyChatCooldown],
+  );
 
   const sendReaction = useCallback((emoji: string) => {
     socketRef.current?.emit(WS_ROOM_EVENTS.REACTION, { emoji });

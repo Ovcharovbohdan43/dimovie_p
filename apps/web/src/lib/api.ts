@@ -155,3 +155,10 @@ export async function publicApi<T>(
 
 /** Direct backend URL — OAuth redirects, WebSocket */
 export const API_URL = SERVER_API_URL.replace("://localhost", "://127.0.0.1");
+
+/** Socket.IO endpoint; falls back to API URL when unset. */
+export const WS_URL = normalizeApiUrl(
+  process.env.NEXT_PUBLIC_WS_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:4000",
+).replace("://localhost", "://127.0.0.1");

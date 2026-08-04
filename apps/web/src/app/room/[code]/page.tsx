@@ -388,12 +388,39 @@ export default function RoomPage({
 
 
   const handleChat = useCallback((msg: ChatMessagePayload) => {
-    setMessages((prev) => [...prev, msg]);
+    const isOptimistic = msg.id.startsWith("opt-");
+
+    setMessages((prev) => {
+      if (prev.some((m) => m.id === msg.id)) return prev;
+      const withoutDupOpt = isOptimistic
+        ? prev
+        : prev.filter(
+            (m) =>
+              !(
+                m.id.startsWith("opt-") &&
+                m.userId === msg.userId &&
+                m.content === msg.content
+              ),
+          );
+      return [...withoutDupOpt, msg];
+    });
 
     const overlayId = `comment-${msg.id}`;
     setPlayerComments((prev) => {
-      const next = [...prev, { id: overlayId, displayName: msg.displayName, content: msg.content }];
-      return next.slice(-4);
+      // Server echo: keep the optimistic overlay already on screen
+      if (
+        !isOptimistic &&
+        prev.some(
+          (c) =>
+            c.displayName === msg.displayName && c.content === msg.content,
+        )
+      ) {
+        return prev;
+      }
+      return [
+        ...prev,
+        { id: overlayId, displayName: msg.displayName, content: msg.content },
+      ].slice(-4);
     });
     setTimeout(() => {
       setPlayerComments((prev) => prev.filter((c) => c.id !== overlayId));
@@ -494,6 +521,30 @@ export default function RoomPage({
       onRoomClosed: handleRoomClosed,
 
     });
+
+  const handleSendChat = useCallback(
+    (content: string) => {
+      const user = me.data;
+      if (!user) return;
+      const optimistic: ChatMessagePayload = {
+        id: `opt-${crypto.randomUUID()}`,
+        roomId: room.data?.id ?? code,
+        userId: user.id,
+        displayName: user.displayName,
+        content,
+        createdAt: new Date().toISOString(),
+      };
+      handleChat(optimistic);
+      const sent = sendChat(content);
+      if (!sent) {
+        setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+        setPlayerComments((prev) =>
+          prev.filter((c) => c.id !== `comment-${optimistic.id}`),
+        );
+      }
+    },
+    [me.data, room.data?.id, code, handleChat, sendChat],
+  );
 
 
 
@@ -977,7 +1028,7 @@ export default function RoomPage({
 
             messages={messages}
 
-            onSend={sendChat}
+            onSend={handleSendChat}
 
             onReaction={sendReaction}
 
@@ -1003,7 +1054,7 @@ export default function RoomPage({
 
         messages={messages}
 
-        onSend={sendChat}
+        onSend={handleSendChat}
 
         onReaction={sendReaction}
 

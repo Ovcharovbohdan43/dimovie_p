@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Logger,
   Post,
   Query,
   Req,
@@ -17,17 +18,23 @@ import { ResolveStreamDto } from './dto/resolve-stream.dto';
 
 @Controller('catalog')
 export class CatalogController {
+  private readonly logger = new Logger(CatalogController.name);
+
   constructor(private readonly rezka: RezkaCatalogService) {}
 
   @Post('rezka/parse')
   @UseGuards(JwtAuthGuard)
   parse(@Body() dto: ParseCatalogDto): Promise<CatalogInfo> {
+    this.logger.log(`POST /catalog/rezka/parse url=${dto.url}`);
     return this.rezka.parseCatalog(dto.url);
   }
 
   @Post('rezka/stream')
   @UseGuards(JwtAuthGuard)
   resolveStream(@Body() dto: ResolveStreamDto): Promise<CatalogStreamResult> {
+    this.logger.log(
+      `POST /catalog/rezka/stream catalog=${dto.catalogUrl} tr=${dto.translationId}`,
+    );
     return this.rezka.resolveStream(
       dto.catalogUrl,
       dto.translationId,
