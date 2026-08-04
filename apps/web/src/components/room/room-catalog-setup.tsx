@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, Link2, Play } from "lucide-react";
 import type { CatalogInfo, CatalogStreamResult, RoomSummary } from "@dimovie/shared";
 import { normalizeCatalogInfo } from "@dimovie/shared";
 import { api } from "@/lib/api";
@@ -12,6 +11,8 @@ import { blurSelectOnChange, catalogSelectClassName } from "@/lib/select-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { PlayMark } from "@/components/home/marks";
 
 interface RoomCatalogSetupProps {
   roomId: string;
@@ -136,24 +137,31 @@ export function RoomCatalogSetup({ roomId, onSuccess }: RoomCatalogSetupProps) {
         <div className="space-y-4 p-6">
           <div>
             <Label className="text-white/70">Link</Label>
-            <div className="mt-2 flex gap-2">
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
               <Input
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="https://example.com/film/..."
                 className="h-11 border-white/10 bg-white/[0.04]"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && url && !parseCatalog.isPending) {
+                    handleLoad();
+                  }
+                }}
               />
               <Button
                 type="button"
-                variant="outline"
-                className="shrink-0 border-white/10"
+                className="h-11 shrink-0 bg-[#00a8e1] px-5 font-semibold text-white hover:bg-[#00a8e1]/90"
                 onClick={handleLoad}
                 disabled={!url || parseCatalog.isPending}
               >
                 {parseCatalog.isPending ? (
-                  <Loader2 className="size-4 animate-spin" />
+                  <>
+                    <LoadingSpinner size="sm" className="mr-2 border-white/25 border-t-white" />
+                    Loading…
+                  </>
                 ) : (
-                  <Link2 className="size-4" />
+                  "Load title"
                 )}
               </Button>
             </div>
@@ -161,7 +169,7 @@ export function RoomCatalogSetup({ roomId, onSuccess }: RoomCatalogSetupProps) {
 
           {parseCatalog.isPending && (
             <p className="text-xs text-white/40">
-              Parsing may take 10–15 seconds — the site is checking access
+              Opening the page can take 10–15 seconds — please wait
             </p>
           )}
 
@@ -248,12 +256,12 @@ export function RoomCatalogSetup({ roomId, onSuccess }: RoomCatalogSetupProps) {
               >
                 {startWatching.isPending ? (
                   <>
-                    <Loader2 className="mr-2 size-4 animate-spin" />
+                    <LoadingSpinner size="sm" className="mr-2" />
                     Loading stream...
                   </>
                 ) : (
                   <>
-                    <Play className="mr-2 size-4 fill-white" />
+                    <PlayMark className="mr-2 size-4" />
                     Start Watching
                   </>
                 )}

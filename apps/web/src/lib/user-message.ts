@@ -81,6 +81,8 @@ const EXACT: Record<string, string> = {
   "The host ended the stream": "The host ended the watch party.",
   "API is temporarily unavailable. Wait a few seconds and refresh the page.":
     "DiMovie is taking a short break. Wait a moment and try again.",
+  "Catalog parsing is temporarily unavailable. Try again in a moment, or paste a YouTube / Vimeo link instead.":
+    "We couldn’t open that title right now. Try again in a moment, or use a YouTube / Vimeo link.",
   "fetchApi: unreachable":
     "DiMovie is taking a short break. Wait a moment and try again.",
   "Internal Server Error":
@@ -134,8 +136,8 @@ const PATTERNS: Array<[RegExp, string]> = [
     "Billing isn’t available right now. Try again later.",
   ],
   [
-    /stream proxy failed|playwright|catalog browser unavailable/i,
-    "We couldn’t open that title right now. Try again in a moment.",
+    /stream proxy failed|playwright|catalog browser unavailable|catalog parsing is temporarily unavailable|executable doesn’t exist|executable doesn't exist/i,
+    "We couldn’t open that title right now. Try again in a moment, or use a YouTube / Vimeo link.",
   ],
   [
     /for these links, use the/i,

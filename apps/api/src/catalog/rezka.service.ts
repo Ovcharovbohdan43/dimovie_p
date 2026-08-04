@@ -157,9 +157,13 @@ export class RezkaCatalogService implements OnModuleDestroy {
         })
         .catch((err) => {
           this.browserInit = null;
+          // Keep technical detail in logs; show a short user-facing message
+          console.error(
+            '[RezkaCatalog] Playwright launch failed:',
+            err instanceof Error ? err.message : err,
+          );
           throw new BadRequestException(
-            `Catalog browser unavailable (${err instanceof Error ? err.message : 'playwright'}). ` +
-              'Chromium is not bundled in the API image; use embed URLs or install Playwright browsers on the host.',
+            'Catalog parsing is temporarily unavailable. Try again in a moment, or paste a YouTube / Vimeo link instead.',
           );
         });
     }

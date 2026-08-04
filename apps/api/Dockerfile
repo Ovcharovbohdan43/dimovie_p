@@ -8,7 +8,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-# Never download browsers during image build (slow + huge on Railway)
+# Skip browser download during npm ci — browsers are installed in the runner stage
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 COPY package.json package-lock.json ./
@@ -38,7 +38,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=4000
 ENV VOICE_SFU_ENABLED=false
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+# Stable browser path used by both install and runtime (Railway)
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
@@ -53,7 +54,9 @@ COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
 COPY apps/api/docker-entrypoint.sh /app/apps/api/docker-entrypoint.sh
 
-RUN chmod +x /app/apps/api/docker-entrypoint.sh
+RUN chmod +x /app/apps/api/docker-entrypoint.sh \
+  && npm exec --workspace=api -- playwright install --with-deps chromium \
+  && node -e "const {chromium}=require('playwright'); chromium.launch({headless:true,args:['--no-sandbox','--disable-dev-shm-usage']}).then(b=>b.close()).then(()=>console.log('playwright chromium ok'))"
 
 WORKDIR /app/apps/api
 EXPOSE 4000
