@@ -140,6 +140,7 @@ export function SyncVideoPlayer({
   const [directDuration, setDirectDuration] = useState(0);
   const [ytTime, setYtTime] = useState(0);
   const [ytDuration, setYtDuration] = useState(0);
+  const [ytPlaying, setYtPlaying] = useState(false);
   const [seekValue, setSeekValue] = useState<number | null>(null);
   const [controlsHovered, setControlsHovered] = useState(false);
   const [scrubbing, setScrubbing] = useState(false);
@@ -196,6 +197,7 @@ export function SyncVideoPlayer({
 
     if (parsed.provider === "youtube") {
       setYtTime(syncState.time);
+      setYtPlaying(syncState.isPlaying);
     }
 
     setTimeout(() => {
@@ -282,11 +284,15 @@ export function SyncVideoPlayer({
           const time = ytPlayer.current?.getCurrentTime() ?? 0;
 
           if (event.data === YT.PlayerState.PLAYING) {
+            setYtPlaying(true);
             lastLocalAction.current = now;
             onIntentRef.current("PLAY", time);
           } else if (event.data === YT.PlayerState.PAUSED) {
+            setYtPlaying(false);
             lastLocalAction.current = now;
             onIntentRef.current("PAUSE", time);
+          } else if (event.data === YT.PlayerState.ENDED) {
+            setYtPlaying(false);
           }
         },
       },
@@ -371,9 +377,14 @@ export function SyncVideoPlayer({
     applyingRemote.current = true;
 
     if (parsed.provider === "youtube" && ytPlayer.current) {
-      const isPlaying = syncState?.isPlaying ?? false;
-      if (isPlaying) ytPlayer.current.pauseVideo();
-      else ytPlayer.current.playVideo();
+      const isPlaying = syncState?.isPlaying ?? ytPlaying;
+      if (isPlaying) {
+        ytPlayer.current.pauseVideo();
+        setYtPlaying(false);
+      } else {
+        ytPlayer.current.playVideo();
+        setYtPlaying(true);
+      }
       onIntentRef.current(isPlaying ? "PAUSE" : "PLAY", time);
     } else if (parsed.provider === "direct" && videoRef.current) {
       const el = videoRef.current;
@@ -398,7 +409,7 @@ export function SyncVideoPlayer({
     setTimeout(() => {
       applyingRemote.current = false;
     }, 400);
-  }, [getTime, syncState?.isPlaying, parsed.provider, canControl]);
+  }, [getTime, syncState?.isPlaying, parsed.provider, canControl, ytPlaying]);
 
   const toggleFullscreen = useCallback(async () => {
     const el = containerRef.current;
@@ -449,7 +460,11 @@ export function SyncVideoPlayer({
 
   const showQuality = isYoutube && qualities.length > 0;
   const showCaptions = isYoutube;
-  const uiPlaying = isDirect ? directPlaying : (syncState?.isPlaying ?? false);
+  const uiPlaying = isDirect
+    ? directPlaying
+    : isYoutube
+      ? (syncState?.isPlaying ?? ytPlaying)
+      : (syncState?.isPlaying ?? false);
   const progressMax = isDirect ? directDuration : isYoutube ? ytDuration : 0;
   const progressValue = Math.min(
     seekValue ?? (isDirect ? directTime : isYoutube ? ytTime : 0),
