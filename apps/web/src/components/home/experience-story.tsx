@@ -66,10 +66,14 @@ export function ExperienceStory() {
                 ease: [0.22, 1, 0.36, 1],
               }}
             >
-              <div
-                className={cnStoryMedia(reverse)}
-              >
-                <div className="relative aspect-[16/10] overflow-hidden md:aspect-[16/9]">
+              <div className={cnStoryMedia(reverse)}>
+                <div
+                  className={
+                    reverse
+                      ? "media-frame-rtl relative aspect-[16/10] md:aspect-[16/9]"
+                      : "media-frame-ltr relative aspect-[16/10] md:aspect-[16/9]"
+                  }
+                >
                   <Image
                     src={step.image}
                     alt={step.alt}
@@ -77,7 +81,14 @@ export function ExperienceStory() {
                     sizes="(max-width: 768px) 100vw, 58vw"
                     className="object-cover transition duration-700 ease-out will-change-transform hover:scale-[1.03]"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#08080c]/70 via-transparent to-transparent" />
+                  <div
+                    aria-hidden
+                    className={
+                      reverse
+                        ? "media-edge-wash media-edge-wash-rtl absolute inset-0"
+                        : "media-edge-wash absolute inset-0"
+                    }
+                  />
                 </div>
               </div>
 
