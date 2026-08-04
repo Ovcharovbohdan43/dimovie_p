@@ -8,10 +8,7 @@ import { useRouter } from "next/navigation";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
-import {
-  Film,
-  MessageCircle,
-} from "lucide-react";
+import { MessageCircle } from "lucide-react";
 
 import type {
 
@@ -564,16 +561,28 @@ export default function RoomPage({
     return (
       <LoadingScreen
         message="Loading room..."
-        className="h-screen bg-[#0b0b0f]"
+        className="h-screen bg-[#08080c]"
       />
     );
   }
 
   if (preview.isError || !preview.data) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-black px-4">
-        <p className="text-[#e50914]">Room not found or link is invalid</p>
-        <Button onClick={() => router.push("/")}>Go home</Button>
+      <div className="relative flex min-h-screen flex-col items-center justify-center gap-4 overflow-hidden bg-[#08080c] px-4">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_35%,rgba(229,9,20,0.12),transparent_55%)]"
+        />
+        <p className="relative font-display text-2xl font-bold tracking-[-0.04em] text-[#e50914]">
+          DiMovie
+        </p>
+        <p className="relative text-[#e50914]">Room not found or link is invalid</p>
+        <Button
+          className="relative bg-white font-semibold text-black hover:bg-white/90"
+          onClick={() => router.push("/")}
+        >
+          Go home
+        </Button>
       </div>
     );
   }
@@ -603,7 +612,7 @@ export default function RoomPage({
     return (
       <LoadingScreen
         message="Joining room..."
-        className="h-screen bg-[#0b0b0f]"
+        className="h-screen bg-[#08080c]"
       />
     );
   }
@@ -642,15 +651,26 @@ export default function RoomPage({
 
     return (
 
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-black px-4">
-
-        <p className="text-[#e50914]">
+      <div className="relative flex min-h-screen flex-col items-center justify-center gap-4 overflow-hidden bg-[#08080c] px-4">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_35%,rgba(229,9,20,0.12),transparent_55%)]"
+        />
+        <p className="relative font-display text-2xl font-bold tracking-[-0.04em] text-[#e50914]">
+          DiMovie
+        </p>
+        <p className="relative text-[#e50914]">
 
           {joinError ?? "Could not join room"}
 
         </p>
 
-        <Button onClick={() => router.push("/dashboard")}>Go Home</Button>
+        <Button
+          className="relative bg-white font-semibold text-black hover:bg-white/90"
+          onClick={() => router.push("/dashboard")}
+        >
+          Go Home
+        </Button>
 
       </div>
 
@@ -664,7 +684,7 @@ export default function RoomPage({
     return (
       <LoadingScreen
         message="Entering watch party..."
-        className="h-screen bg-[#0b0b0f]"
+        className="h-screen bg-[#08080c]"
       />
     );
   }
@@ -673,7 +693,7 @@ export default function RoomPage({
 
   return (
 
-    <div className="flex h-screen flex-col overflow-hidden bg-[#0b0b0f]">
+    <div className="flex h-screen flex-col overflow-hidden bg-[#08080c]">
 
       {room.data && (
 
@@ -729,17 +749,21 @@ export default function RoomPage({
 
         <div className="flex min-w-0 flex-1 flex-col overflow-y-auto scrollbar-dimovie">
 
-          <div className="flex flex-1 flex-col justify-center bg-[radial-gradient(ellipse_at_center,_#1a1a1f_0%,_#0b0b0f_70%)] px-4 py-5 md:px-6 lg:px-8">
+          <div className="relative flex flex-1 flex-col justify-center px-4 py-5 md:px-6 lg:px-8">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_35%,rgba(229,9,20,0.08),transparent_50%),radial-gradient(ellipse_at_center,#14141a_0%,#08080c_72%)]"
+            />
 
             {showSetup && isOwner && room.data ? (
 
-              <div className="mx-auto w-full max-w-lg space-y-6">
+              <div className="relative mx-auto w-full max-w-lg space-y-6">
 
-                <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-[#181818] shadow-2xl">
+                <div className="overflow-hidden border border-white/[0.08] bg-[#0e0e14]/88 shadow-[0_30px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
 
-                  <div className="border-b border-white/[0.06] bg-gradient-to-r from-[#e50914]/10 to-transparent px-6 py-4">
+                  <div className="border-b border-white/[0.06] bg-gradient-to-r from-[#e50914]/12 to-transparent px-6 py-4">
 
-                    <h2 className="text-lg font-bold">Set up your watch party</h2>
+                    <h2 className="font-display text-lg font-semibold tracking-[-0.02em]">Set up your watch party</h2>
 
                     <p className="mt-1 text-sm text-white/50">
 
@@ -864,23 +888,21 @@ export default function RoomPage({
 
             ) : (
 
-              <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
+              <div className="relative flex flex-col items-center justify-center gap-4 py-20 text-center">
 
-                <div className="flex size-16 items-center justify-center rounded-full bg-white/[0.04] ring-1 ring-white/[0.06]">
-
-                  <Film className="size-8 text-white/20" />
-
-                </div>
+                <p className="font-display text-3xl font-bold tracking-[-0.04em] text-[#e50914]/80">
+                  DiMovie
+                </p>
 
                 <div>
 
-                  <p className="font-medium text-white/60">
+                  <p className="font-display text-base font-semibold tracking-[-0.01em] text-white/70">
 
                     Waiting for the host to pick a video
 
                   </p>
 
-                  <p className="mt-1 text-sm text-white/30">
+                  <p className="mt-1 text-sm text-white/35">
 
                     You&apos;ll see it here when they&apos;re ready
 

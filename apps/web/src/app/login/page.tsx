@@ -12,10 +12,14 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { API_URL } from "@/lib/api";
+import { CinematicShell } from "@/components/layout/cinematic-shell";
+import { LoadingScreen } from "@/components/ui/loading-spinner";
 
 export default function LoginPage() {
   return (
-    <Suspense>
+    <Suspense
+      fallback={<LoadingScreen message="Loading..." className="h-screen bg-[#08080c]" />}
+    >
       <LoginForm />
     </Suspense>
   );
@@ -40,11 +44,18 @@ function LoginForm() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4 pt-16">
-      <div className="w-full max-w-md space-y-8 rounded-lg border border-white/10 bg-[#181818] p-8">
+    <CinematicShell>
+      <div className="space-y-7">
         <div className="text-center">
-          <h1 className="text-3xl font-black text-[#e50914]">DiMovie</h1>
-          <p className="mt-2 text-white/60">Sign in to your account</p>
+          <p className="font-display text-4xl font-bold tracking-[-0.04em] text-[#e50914]">
+            DiMovie
+          </p>
+          <h1 className="mt-3 font-display text-xl font-semibold tracking-[-0.02em] text-white">
+            Sign in to your account
+          </h1>
+          <p className="mt-1.5 text-sm text-white/50">
+            Pick up where the room left off
+          </p>
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -54,7 +65,7 @@ function LoginForm() {
               id="email"
               type="email"
               {...register("email")}
-              className="mt-1 border-white/10 bg-white/5"
+              className="mt-1 h-11 border-white/10 bg-white/[0.04]"
             />
             {errors.email && (
               <p className="mt-1 text-xs text-[#e50914]">{errors.email.message}</p>
@@ -66,7 +77,7 @@ function LoginForm() {
               id="password"
               type="password"
               {...register("password")}
-              className="mt-1 border-white/10 bg-white/5"
+              className="mt-1 h-11 border-white/10 bg-white/[0.04]"
             />
             {errors.password && (
               <p className="mt-1 text-xs text-[#e50914]">
@@ -81,7 +92,7 @@ function LoginForm() {
 
           <Button
             type="submit"
-            className="w-full bg-[#e50914] hover:bg-[#f40612]"
+            className="h-11 w-full bg-[#e50914] text-[0.95rem] font-semibold hover:bg-[#f40612]"
             disabled={login.isPending}
           >
             {login.isPending ? "Signing in..." : "Sign In"}
@@ -93,20 +104,26 @@ function LoginForm() {
             <div className="w-full border-t border-white/10" />
           </div>
           <div className="relative flex justify-center text-xs">
-            <span className="bg-[#181818] px-2 text-white/40">or continue with</span>
+            <span className="bg-[#0e0e14]/90 px-2 text-white/40">or continue with</span>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <a
             href={`${API_URL}/auth/google`}
-            className={cn(buttonVariants({ variant: "outline" }), "border-white/10 text-center")}
+            className={cn(
+              buttonVariants({ variant: "outline" }),
+              "h-10 border-white/12 bg-white/[0.03] text-center hover:bg-white/[0.08]",
+            )}
           >
             Google
           </a>
           <a
             href={`${API_URL}/auth/discord`}
-            className={cn(buttonVariants({ variant: "outline" }), "border-white/10 text-center")}
+            className={cn(
+              buttonVariants({ variant: "outline" }),
+              "h-10 border-white/12 bg-white/[0.03] text-center hover:bg-white/[0.08]",
+            )}
           >
             Discord
           </a>
@@ -119,6 +136,6 @@ function LoginForm() {
           </Link>
         </p>
       </div>
-    </div>
+    </CinematicShell>
   );
 }

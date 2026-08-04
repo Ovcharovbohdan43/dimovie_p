@@ -9,7 +9,6 @@ import {
   type LoginInput,
   type RegisterInput,
 } from "@dimovie/shared";
-import { Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 
 interface RoomGuestAuthModalProps {
   roomCode: string;
@@ -62,10 +62,10 @@ export function RoomGuestAuthModal({
     <Dialog open disablePointerDismissal onOpenChange={() => undefined}>
       <DialogContent
         showCloseButton={false}
-        className="max-w-md border-white/10 bg-[#181818] text-white sm:max-w-md"
+        className="max-w-md border-white/10 bg-[#0e0e14]/92 text-white backdrop-blur-xl sm:max-w-md"
       >
         <DialogHeader>
-          <DialogTitle className="text-xl font-bold">
+          <DialogTitle className="font-display text-xl font-semibold tracking-[-0.02em]">
             Sign in to watch together
           </DialogTitle>
           <DialogDescription className="text-white/50">
@@ -74,12 +74,12 @@ export function RoomGuestAuthModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex rounded-lg bg-white/[0.04] p-1">
+        <div className="flex bg-white/[0.04] p-1">
           <button
             type="button"
             onClick={() => setMode("register")}
             className={cn(
-              "flex-1 cursor-pointer select-none rounded-md py-2 text-sm font-medium transition",
+              "flex-1 cursor-pointer select-none py-2 text-sm font-medium transition",
               mode === "register"
                 ? "bg-[#e50914] text-white"
                 : "text-white/50 hover:text-white",
@@ -91,7 +91,7 @@ export function RoomGuestAuthModal({
             type="button"
             onClick={() => setMode("login")}
             className={cn(
-              "flex-1 cursor-pointer select-none rounded-md py-2 text-sm font-medium transition",
+              "flex-1 cursor-pointer select-none py-2 text-sm font-medium transition",
               mode === "login"
                 ? "bg-[#e50914] text-white"
                 : "text-white/50 hover:text-white",
@@ -111,7 +111,7 @@ export function RoomGuestAuthModal({
               <Input
                 id="guest-displayName"
                 {...registerForm.register("displayName")}
-                className="mt-1 border-white/10 bg-white/5"
+                className="mt-1 h-11 border-white/10 bg-white/[0.04]"
                 autoComplete="nickname"
               />
               {registerForm.formState.errors.displayName && (
@@ -126,7 +126,7 @@ export function RoomGuestAuthModal({
                 id="guest-email-reg"
                 type="email"
                 {...registerForm.register("email")}
-                className="mt-1 border-white/10 bg-white/5"
+                className="mt-1 h-11 border-white/10 bg-white/[0.04]"
                 autoComplete="email"
               />
               {registerForm.formState.errors.email && (
@@ -141,7 +141,7 @@ export function RoomGuestAuthModal({
                 id="guest-password-reg"
                 type="password"
                 {...registerForm.register("password")}
-                className="mt-1 border-white/10 bg-white/5"
+                className="mt-1 h-11 border-white/10 bg-white/[0.04]"
                 autoComplete="new-password"
               />
               {registerForm.formState.errors.password && (
@@ -152,12 +152,12 @@ export function RoomGuestAuthModal({
             </div>
             <Button
               type="submit"
-              className="w-full bg-[#e50914] hover:bg-[#f40612]"
+              className="h-11 w-full bg-[#e50914] font-semibold hover:bg-[#f40612]"
               disabled={pending}
             >
               {pending ? (
                 <>
-                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  <LoadingSpinner size="sm" className="mr-2" />
                   Creating account...
                 </>
               ) : (
@@ -176,7 +176,7 @@ export function RoomGuestAuthModal({
                 id="guest-email-login"
                 type="email"
                 {...loginForm.register("email")}
-                className="mt-1 border-white/10 bg-white/5"
+                className="mt-1 h-11 border-white/10 bg-white/[0.04]"
                 autoComplete="email"
               />
               {loginForm.formState.errors.email && (
@@ -191,7 +191,7 @@ export function RoomGuestAuthModal({
                 id="guest-password-login"
                 type="password"
                 {...loginForm.register("password")}
-                className="mt-1 border-white/10 bg-white/5"
+                className="mt-1 h-11 border-white/10 bg-white/[0.04]"
                 autoComplete="current-password"
               />
               {loginForm.formState.errors.password && (
@@ -202,12 +202,12 @@ export function RoomGuestAuthModal({
             </div>
             <Button
               type="submit"
-              className="w-full bg-[#e50914] hover:bg-[#f40612]"
+              className="h-11 w-full bg-[#e50914] font-semibold hover:bg-[#f40612]"
               disabled={pending}
             >
               {pending ? (
                 <>
-                  <Loader2 className="mr-2 size-4 animate-spin" />
+                  <LoadingSpinner size="sm" className="mr-2" />
                   Signing in...
                 </>
               ) : (

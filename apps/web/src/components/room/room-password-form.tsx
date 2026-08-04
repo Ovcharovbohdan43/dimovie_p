@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CinematicShell } from "@/components/layout/cinematic-shell";
 
 interface RoomPasswordFormProps {
   roomCode: string;
@@ -22,14 +22,20 @@ export function RoomPasswordForm({
   const [password, setPassword] = useState("");
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-black px-4">
-      <div className="w-full max-w-sm space-y-5 rounded-lg border border-white/10 bg-[#181818] p-6">
-        <div className="flex flex-col items-center gap-2 text-center">
-          <div className="flex size-12 items-center justify-center rounded-full bg-[#e50914]/20">
-            <Lock className="size-6 text-[#e50914]" />
-          </div>
-          <h1 className="text-lg font-bold">Password required</h1>
-          <p className="text-sm text-white/50">
+    <CinematicShell
+      imageSrc="https://images.unsplash.com/photo-1440404653325-ab127d49abc1?auto=format&fit=crop&w=2400&q=80"
+      imageAlt="Cinema screen in a dark hall"
+      panelClassName="max-w-sm"
+    >
+      <div className="space-y-6">
+        <div className="text-center">
+          <p className="font-display text-3xl font-bold tracking-[-0.04em] text-[#e50914]">
+            DiMovie
+          </p>
+          <h1 className="mt-3 font-display text-xl font-semibold tracking-[-0.02em] text-white">
+            Password required
+          </h1>
+          <p className="mt-1.5 text-sm text-white/50">
             Enter the password to join room {roomCode.toUpperCase()}
           </p>
         </div>
@@ -42,7 +48,7 @@ export function RoomPasswordForm({
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Enter password"
-            className="mt-1 border-white/10 bg-white/5"
+            className="mt-1 h-11 border-white/10 bg-white/[0.04]"
             autoFocus
             onKeyDown={(e) => {
               if (e.key === "Enter" && password.trim()) {
@@ -55,13 +61,13 @@ export function RoomPasswordForm({
         {error && <p className="text-sm text-[#e50914]">{error}</p>}
 
         <Button
-          className="w-full bg-[#e50914] hover:bg-[#f40612]"
+          className="h-11 w-full bg-[#e50914] font-semibold hover:bg-[#f40612]"
           disabled={!password.trim() || isPending}
           onClick={() => onSubmit(password)}
         >
           {isPending ? "Joining..." : "Join room"}
         </Button>
       </div>
-    </div>
+    </CinematicShell>
   );
 }

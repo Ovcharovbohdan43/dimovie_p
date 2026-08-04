@@ -49,3 +49,19 @@ export function LiveDot({ className }: { className?: string }) {
     />
   );
 }
+
+export function PlusMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden className={className}>
+      <path d="M12 5v14M5 12h14" strokeLinecap="square" />
+    </svg>
+  );
+}
+
+export function BackMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden className={className}>
+      <path d="M15 5L8 12l7 7" strokeLinecap="square" />
+    </svg>
+  );
+}

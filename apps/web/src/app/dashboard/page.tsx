@@ -3,13 +3,14 @@
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Loader2 } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import type { RoomSummary, WatchHistoryItem } from "@dimovie/shared";
 import { getPlanCapabilities } from "@dimovie/shared";
 import { api } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { ContentRow } from "@/components/home/content-row";
 import { RoomCard } from "@/components/home/room-card";
+import { PlayMark, PlusMark } from "@/components/home/marks";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,12 +22,14 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LoadingScreen } from "@/components/ui/loading-spinner";
 
 function DashboardContent() {
   const router = useRouter();
   const params = useSearchParams();
   const qc = useQueryClient();
   const { me } = useAuth();
+  const reduceMotion = useReducedMotion();
   const [open, setOpen] = useState(params.get("create") === "true");
   const [privacy, setPrivacy] = useState<"PUBLIC" | "PRIVATE" | "PASSWORD">("PUBLIC");
   const [password, setPassword] = useState("");
@@ -71,36 +74,53 @@ function DashboardContent() {
 
   if (me.isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center pt-16">
-        <Loader2 className="size-8 animate-spin text-[#e50914]" />
-      </div>
+      <LoadingScreen
+        message="Loading your parties..."
+        className="min-h-screen bg-[#08080c] pt-16"
+      />
     );
   }
 
   return (
-    <div className="min-h-screen pt-20 pb-16">
-      <div className="mx-auto max-w-[1920px] px-4 md:px-8 lg:px-12">
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold md:text-3xl">
+    <div className="relative min-h-screen overflow-hidden pb-20 pt-16">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(ellipse_at_20%_0%,rgba(229,9,20,0.16),transparent_50%),radial-gradient(ellipse_at_80%_10%,rgba(0,168,225,0.1),transparent_45%)]"
+      />
+
+      <div className="relative mx-auto max-w-[1920px] px-4 sm:px-6 md:px-10 lg:px-14">
+        <motion.div
+          className="mb-10 flex flex-col gap-6 border-b border-white/[0.06] pb-8 pt-8 sm:mb-12 sm:flex-row sm:items-end sm:justify-between md:pt-10"
+          initial={reduceMotion ? false : { opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <div className="max-w-xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00a8e1]">
+              Your stage
+            </p>
+            <h1 className="mt-2 font-display text-[clamp(1.75rem,4vw,2.75rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-white">
               Welcome back, {me.data?.displayName}
             </h1>
-            <p className="mt-1 text-white/50">
-              Your watch parties and history
+            <p className="mt-2 text-sm text-white/55 md:text-base">
+              Active parties, continue watching, one tap to start the night.
             </p>
           </div>
+
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger
               render={
-                <Button className="bg-[#e50914] hover:bg-[#f40612]">
-                  <Plus className="mr-2 size-4" />
-                  New Party
+                <Button className="h-11 bg-[#e50914] px-5 text-[0.95rem] font-semibold hover:bg-[#f40612]">
+                  <PlusMark className="mr-2 size-4" />
+                  New party
                 </Button>
               }
             />
-            <DialogContent className="border-white/10 bg-[#181818]">
+            <DialogContent className="border-white/10 bg-[#121218]/95 backdrop-blur-xl">
               <DialogHeader>
-                <DialogTitle>Create Watch Party</DialogTitle>
+                <DialogTitle className="font-display text-xl tracking-[-0.02em]">
+                  Create watch party
+                </DialogTitle>
               </DialogHeader>
               <div className="space-y-4 pt-2">
                 <div>
@@ -110,7 +130,7 @@ function DashboardContent() {
                     onChange={(e) =>
                       setPrivacy(e.target.value as typeof privacy)
                     }
-                    className="mt-1 w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-md border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm"
                   >
                     <option value="PUBLIC">Public</option>
                     <option value="PRIVATE">Private (link only)</option>
@@ -124,7 +144,7 @@ function DashboardContent() {
                       type="password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="mt-1 border-white/10 bg-white/5"
+                      className="mt-1 border-white/10 bg-white/[0.04]"
                     />
                   </div>
                 )}
@@ -136,7 +156,7 @@ function DashboardContent() {
                     placeholder="What's this watch party about?"
                     maxLength={500}
                     rows={3}
-                    className="mt-1 w-full resize-none rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-[#e50914]"
+                    className="mt-1 w-full resize-none rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-[#e50914]"
                   />
                 </div>
                 {privacy === "PUBLIC" && (
@@ -148,7 +168,7 @@ function DashboardContent() {
                       placeholder="Be respectful, no spoilers in chat..."
                       maxLength={1000}
                       rows={3}
-                      className="mt-1 w-full resize-none rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-[#e50914]"
+                      className="mt-1 w-full resize-none rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-[#e50914]"
                     />
                     <p className="mt-1 text-xs text-white/40">
                       Shown to everyone browsing public rooms
@@ -156,62 +176,84 @@ function DashboardContent() {
                   </div>
                 )}
                 <Button
-                  className="w-full bg-[#e50914] hover:bg-[#f40612]"
+                  className="h-11 w-full bg-[#e50914] font-semibold hover:bg-[#f40612]"
                   onClick={() => createRoom.mutate()}
                   disabled={
                     createRoom.isPending ||
                     (privacy === "PASSWORD" && password.length < 4)
                   }
                 >
-                  {createRoom.isPending ? "Creating..." : "Create Room"}
+                  <PlayMark className="mr-2 size-4" />
+                  {createRoom.isPending ? "Creating..." : "Create room"}
                 </Button>
               </div>
             </DialogContent>
           </Dialog>
-        </div>
+        </motion.div>
 
-        <ContentRow title="Active Watch Parties">
-          {rooms.isLoading ? (
-            <>
-              <Skeleton className="h-[320px] w-[300px] flex-shrink-0" />
-              <Skeleton className="h-[320px] w-[300px] flex-shrink-0" />
-            </>
-          ) : rooms.data?.length ? (
-            rooms.data.map((room) => <RoomCard key={room.id} room={room} />)
-          ) : (
-            <p className="py-8 text-white/40">No active rooms — create one!</p>
-          )}
-        </ContentRow>
-
-        {!(planCaps?.watchHistory ?? false) ? (
-          <ContentRow title="Continue Watching" className="mt-8">
-            <p className="py-4 text-sm text-white/40">
-              Watch history is available on Pro and Enterprise plans.{" "}
-              <a href="/pricing" className="text-[#e50914] hover:underline">
-                Upgrade
-              </a>
-            </p>
-          </ContentRow>
-        ) : (
-          history.data &&
-          history.data.length > 0 && (
-            <ContentRow title="Continue Watching" className="mt-8">
-              {history.data.map((item) => (
-                <div
-                  key={item.id}
-                  className="card-hover-glow w-[280px] flex-shrink-0 overflow-hidden rounded-md bg-[#181818]"
+        <div className="space-y-12">
+          <ContentRow title="Active watch parties">
+            {rooms.isLoading ? (
+              <>
+                <Skeleton className="aspect-video h-auto w-[72vw] max-w-[300px] flex-shrink-0 snap-start rounded-none sm:w-[260px]" />
+                <Skeleton className="aspect-video h-auto w-[72vw] max-w-[300px] flex-shrink-0 snap-start rounded-none sm:w-[260px]" />
+              </>
+            ) : rooms.data?.length ? (
+              rooms.data.map((room) => <RoomCard key={room.id} room={room} />)
+            ) : (
+              <div className="flex w-full max-w-md flex-col gap-3 py-6">
+                <p className="text-sm text-white/45">
+                  No active rooms yet — open the night with one tap.
+                </p>
+                <Button
+                  className="h-10 w-fit bg-white px-4 font-semibold text-black hover:bg-white/90"
+                  onClick={() => setOpen(true)}
                 >
-                  <div className="aspect-video bg-gradient-to-br from-[#2f2f2f] to-[#181818] p-4">
-                    <p className="truncate font-bold">{item.title}</p>
-                    <p className="mt-2 text-xs text-white/40">
-                      {new Date(item.watchedAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                </div>
-              ))}
+                  <PlayMark className="mr-2 size-3.5" />
+                  Start a party
+                </Button>
+              </div>
+            )}
+          </ContentRow>
+
+          {!(planCaps?.watchHistory ?? false) ? (
+            <ContentRow title="Continue watching">
+              <p className="py-4 text-sm text-white/40">
+                Watch history unlocks on Pro and Enterprise.{" "}
+                <a href="/pricing" className="text-[#e50914] hover:underline">
+                  Upgrade
+                </a>
+              </p>
             </ContentRow>
-          )
-        )}
+          ) : (
+            history.data &&
+            history.data.length > 0 && (
+              <ContentRow title="Continue watching">
+                {history.data.map((item) => (
+                  <motion.div
+                    key={item.id}
+                    className="w-[72vw] max-w-[280px] flex-shrink-0 snap-start overflow-hidden bg-[#121218] sm:w-[240px]"
+                    whileHover={{ y: -3 }}
+                    transition={{ type: "spring", stiffness: 420, damping: 28 }}
+                  >
+                    <div className="media-frame-ltr relative aspect-video">
+                      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_20%,rgba(229,9,20,0.2),transparent_55%),linear-gradient(160deg,#1c1c24,#0e0e14)]" />
+                      <div className="media-edge-wash absolute inset-0" />
+                      <div className="absolute inset-x-0 bottom-0 p-3.5">
+                        <p className="truncate font-display text-sm font-semibold tracking-[-0.01em]">
+                          {item.title}
+                        </p>
+                        <p className="mt-1 text-xs text-white/40">
+                          {new Date(item.watchedAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </ContentRow>
+            )
+          )}
+        </div>
       </div>
     </div>
   );
@@ -221,9 +263,10 @@ export default function DashboardPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center">
-          <Loader2 className="size-8 animate-spin text-[#e50914]" />
-        </div>
+        <LoadingScreen
+          message="Loading..."
+          className="min-h-screen bg-[#08080c]"
+        />
       }
     >
       <DashboardContent />

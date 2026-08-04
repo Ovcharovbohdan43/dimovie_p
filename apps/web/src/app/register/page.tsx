@@ -9,6 +9,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CinematicShell } from "@/components/layout/cinematic-shell";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -27,11 +28,21 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4 pt-16">
-      <div className="w-full max-w-md space-y-8 rounded-lg border border-white/10 bg-[#181818] p-8">
+    <CinematicShell
+      imageSrc="https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?auto=format&fit=crop&w=2400&q=80"
+      imageAlt="Projector light in a dark theater"
+    >
+      <div className="space-y-7">
         <div className="text-center">
-          <h1 className="text-3xl font-black text-[#e50914]">DiMovie</h1>
-          <p className="mt-2 text-white/60">Create your free account</p>
+          <p className="font-display text-4xl font-bold tracking-[-0.04em] text-[#e50914]">
+            DiMovie
+          </p>
+          <h1 className="mt-3 font-display text-xl font-semibold tracking-[-0.02em] text-white">
+            Create your free account
+          </h1>
+          <p className="mt-1.5 text-sm text-white/50">
+            Open a room and invite the night in
+          </p>
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -40,7 +51,7 @@ export default function RegisterPage() {
             <Input
               id="displayName"
               {...register("displayName")}
-              className="mt-1 border-white/10 bg-white/5"
+              className="mt-1 h-11 border-white/10 bg-white/[0.04]"
             />
             {errors.displayName && (
               <p className="mt-1 text-xs text-[#e50914]">
@@ -54,7 +65,7 @@ export default function RegisterPage() {
               id="email"
               type="email"
               {...register("email")}
-              className="mt-1 border-white/10 bg-white/5"
+              className="mt-1 h-11 border-white/10 bg-white/[0.04]"
             />
             {errors.email && (
               <p className="mt-1 text-xs text-[#e50914]">{errors.email.message}</p>
@@ -66,7 +77,7 @@ export default function RegisterPage() {
               id="password"
               type="password"
               {...register("password")}
-              className="mt-1 border-white/10 bg-white/5"
+              className="mt-1 h-11 border-white/10 bg-white/[0.04]"
             />
             {errors.password && (
               <p className="mt-1 text-xs text-[#e50914]">
@@ -81,7 +92,7 @@ export default function RegisterPage() {
 
           <Button
             type="submit"
-            className="w-full bg-[#e50914] hover:bg-[#f40612]"
+            className="h-11 w-full bg-[#e50914] text-[0.95rem] font-semibold hover:bg-[#f40612]"
             disabled={registerUser.isPending}
           >
             {registerUser.isPending ? "Creating..." : "Create Account"}
@@ -95,6 +106,6 @@ export default function RegisterPage() {
           </Link>
         </p>
       </div>
-    </div>
+    </CinematicShell>
   );
 }
