@@ -164,8 +164,9 @@ function resumeAllRemoteAudio(audioEls: Map<string, HTMLAudioElement>) {
   }
 }
 
-const RELAY_SAMPLE_RATE = 16000;
 const RELAY_BUFFER_SIZE = 2048;
+/** Target rate for Socket.IO PCM — keeps packets small on mobile networks. */
+const RELAY_TARGET_RATE = 16000;
 
 type RelayCapture = {
   ctx: AudioContext;
@@ -189,6 +190,30 @@ function base64ToPcm(b64: string): Int16Array {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return new Int16Array(bytes.buffer);
+}
+
+/** Naive downsample for relay bandwidth; keeps speech intelligible. */
+function downsampleToInt16(
+  input: Float32Array,
+  inRate: number,
+  outRate: number,
+): Int16Array {
+  if (inRate <= outRate) {
+    const pcm = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i++) {
+      const s = Math.max(-1, Math.min(1, input[i]!));
+      pcm[i] = s < 0 ? (s * 0x8000) | 0 : (s * 0x7fff) | 0;
+    }
+    return pcm;
+  }
+  const ratio = inRate / outRate;
+  const outLen = Math.max(1, Math.floor(input.length / ratio));
+  const pcm = new Int16Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const s = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)]!));
+    pcm[i] = s < 0 ? (s * 0x8000) | 0 : (s * 0x7fff) | 0;
+  }
+  return pcm;
 }
 
 export function useVoiceChat({
@@ -249,47 +274,61 @@ export function useVoiceChat({
     }
   }, []);
 
-  const playRelayPcm = useCallback(async (pcm: Int16Array) => {
-    try {
-      const AudioCtx =
-        window.AudioContext ||
-        (
-          window as unknown as {
-            webkitAudioContext?: typeof AudioContext;
-          }
-        ).webkitAudioContext;
-      if (!AudioCtx) return;
+  const playRelayPcm = useCallback(
+    async (pcm: Int16Array, sampleRate = RELAY_TARGET_RATE) => {
+      try {
+        const AudioCtx =
+          window.AudioContext ||
+          (
+            window as unknown as {
+              webkitAudioContext?: typeof AudioContext;
+            }
+          ).webkitAudioContext;
+        if (!AudioCtx) return;
 
-      let ctx = relayPlayCtxRef.current;
-      if (!ctx || ctx.state === "closed") {
-        ctx = new AudioCtx({ sampleRate: RELAY_SAMPLE_RATE });
-        relayPlayCtxRef.current = ctx;
-        relayNextTimeRef.current = 0;
-      }
-      if (ctx.state === "suspended") await ctx.resume();
+        let ctx = relayPlayCtxRef.current;
+        if (!ctx || ctx.state === "closed") {
+          // Prefer native rate — Web Audio will resample the buffer.
+          ctx = new AudioCtx();
+          relayPlayCtxRef.current = ctx;
+          relayNextTimeRef.current = 0;
+        }
+        if (ctx.state === "suspended") {
+          await ctx.resume().catch(() => undefined);
+        }
+        // iOS blocks audio until a tap unlocks the AudioContext.
+        if (ctx.state !== "running") {
+          setNeedsAudioUnlock(true);
+          return;
+        }
 
-      const floats = new Float32Array(pcm.length);
-      for (let i = 0; i < pcm.length; i++) {
-        floats[i] = pcm[i]! / 32768;
+        const floats = new Float32Array(pcm.length);
+        for (let i = 0; i < pcm.length; i++) {
+          floats[i] = pcm[i]! / 32768;
+        }
+        const rate = sampleRate > 0 ? sampleRate : RELAY_TARGET_RATE;
+        const buffer = ctx.createBuffer(1, floats.length, rate);
+        buffer.copyToChannel(floats, 0);
+        const src = ctx.createBufferSource();
+        src.buffer = buffer;
+        src.connect(ctx.destination);
+        const startAt = Math.max(
+          ctx.currentTime + 0.03,
+          relayNextTimeRef.current,
+        );
+        src.start(startAt);
+        relayNextTimeRef.current = startAt + buffer.duration;
+      } catch {
+        setNeedsAudioUnlock(true);
       }
-      const buffer = ctx.createBuffer(1, floats.length, RELAY_SAMPLE_RATE);
-      buffer.copyToChannel(floats, 0);
-      const src = ctx.createBufferSource();
-      src.buffer = buffer;
-      src.connect(ctx.destination);
-      const startAt = Math.max(ctx.currentTime + 0.02, relayNextTimeRef.current);
-      src.start(startAt);
-      relayNextTimeRef.current = startAt + buffer.duration;
-    } catch {
-      /* ignore decode glitches */
-    }
-  }, []);
+    },
+    [],
+  );
 
   const startRelayCapture = useCallback(async () => {
     if (relayActiveRef.current || !localStreamRef.current || !socketRef.current) {
       return;
     }
-    if (webrtcLiveRef.current.size > 0) return;
 
     try {
       const AudioCtx =
@@ -301,7 +340,8 @@ export function useVoiceChat({
         ).webkitAudioContext;
       if (!AudioCtx) return;
 
-      const ctx = new AudioCtx({ sampleRate: RELAY_SAMPLE_RATE });
+      // Native sample rate (often 48000). Forcing 16000 breaks on iOS/Safari.
+      const ctx = new AudioCtx();
       if (ctx.state === "suspended") await ctx.resume();
       const source = ctx.createMediaStreamSource(localStreamRef.current);
       const processor = ctx.createScriptProcessor(RELAY_BUFFER_SIZE, 1, 1);
@@ -310,16 +350,20 @@ export function useVoiceChat({
 
       processor.onaudioprocess = (event) => {
         if (!relayActiveRef.current || mutedRef.current) return;
+        // Keep sending until WebRTC is live for every peer — for 1:1, any live peer is enough.
         if (webrtcLiveRef.current.size > 0) return;
         const socket = socketRef.current;
         if (!socket) return;
         const input = event.inputBuffer.getChannelData(0);
-        const pcm = new Int16Array(input.length);
-        for (let i = 0; i < input.length; i++) {
-          const s = Math.max(-1, Math.min(1, input[i]!));
-          pcm[i] = s < 0 ? (s * 0x8000) | 0 : (s * 0x7fff) | 0;
-        }
-        socket.emit(WS_ROOM_EVENTS.VOICE_AUDIO, { pcm: pcmToBase64(pcm) });
+        const pcm = downsampleToInt16(
+          input,
+          ctx.sampleRate,
+          RELAY_TARGET_RATE,
+        );
+        socket.emit(WS_ROOM_EVENTS.VOICE_AUDIO, {
+          pcm: pcmToBase64(pcm),
+          sampleRate: RELAY_TARGET_RATE,
+        });
       };
 
       source.connect(processor);
@@ -329,6 +373,8 @@ export function useVoiceChat({
       relayCaptureRef.current = { ctx, processor, source, silent };
       relayActiveRef.current = true;
       setUsingRelay(true);
+      // Relay playback almost always needs a tap on iOS Safari.
+      setNeedsAudioUnlock(true);
     } catch {
       /* relay optional */
     }
@@ -424,8 +470,19 @@ export function useVoiceChat({
         if (pc.connectionState === "connected") {
           iceRestartingRef.current.delete(targetUserId);
           webrtcLiveRef.current.add(targetUserId);
-          stopRelayCapture();
           resumeAllRemoteAudio(audioElsRef.current);
+          // Delay stopping PCM relay — "connected" can be a false friend when
+          // media never actually flows (common across carrier NATs).
+          window.setTimeout(() => {
+            if (
+              webrtcLiveRef.current.has(targetUserId) &&
+              audioElsRef.current.has(targetUserId) &&
+              peersRef.current.get(targetUserId)?.connectionState ===
+                "connected"
+            ) {
+              stopRelayCapture();
+            }
+          }, 4000);
           return;
         }
 
@@ -652,12 +709,19 @@ export function useVoiceChat({
 
       socket.on(
         WS_ROOM_EVENTS.VOICE_AUDIO,
-        (payload: { fromUserId: string; pcm: string }) => {
+        (payload: {
+          fromUserId: string;
+          pcm: string;
+          sampleRate?: number;
+        }) => {
           const me = currentUserIdRef.current;
           if (!payload?.pcm || payload.fromUserId === me) return;
           // Prefer WebRTC when that peer already has a live media path.
           if (webrtcLiveRef.current.has(payload.fromUserId)) return;
-          void playRelayPcm(base64ToPcm(payload.pcm));
+          void playRelayPcm(
+            base64ToPcm(payload.pcm),
+            payload.sampleRate ?? RELAY_TARGET_RATE,
+          );
         },
       );
 
@@ -675,16 +739,19 @@ export function useVoiceChat({
       });
       setConnected(true);
 
-      // If ICE/TURN cannot complete quickly (common on mobile NATs), fall back
-      // to Socket.IO PCM relay so voice still works on Railway without TURN.
+      // Start Socket.IO PCM immediately — WebRTC/TURN often never completes
+      // between mobile carrier NAT and desktop. WebRTC still attempted in parallel.
+      mutedRef.current = false;
+      await startRelayCapture();
       if (relayTimerRef.current != null) {
         window.clearTimeout(relayTimerRef.current);
       }
+      // Retry capture once if AudioContext was still suspended.
       relayTimerRef.current = window.setTimeout(() => {
-        if (webrtcLiveRef.current.size === 0) {
+        if (!relayActiveRef.current && webrtcLiveRef.current.size === 0) {
           void startRelayCapture();
         }
-      }, 2500);
+      }, 800);
     } catch (err) {
       setError(
         err instanceof Error && /denied|notallowed|permission/i.test(err.message)
@@ -714,11 +781,40 @@ export function useVoiceChat({
   const unlockRemoteAudio = useCallback(async () => {
     await unlockAudioPlayback();
     resumeAllRemoteAudio(audioElsRef.current);
-    if (relayPlayCtxRef.current?.state === "suspended") {
-      await relayPlayCtxRef.current.resume().catch(() => undefined);
+
+    const AudioCtx =
+      window.AudioContext ||
+      (
+        window as unknown as {
+          webkitAudioContext?: typeof AudioContext;
+        }
+      ).webkitAudioContext;
+    if (AudioCtx) {
+      let playCtx = relayPlayCtxRef.current;
+      if (!playCtx || playCtx.state === "closed") {
+        playCtx = new AudioCtx();
+        relayPlayCtxRef.current = playCtx;
+        relayNextTimeRef.current = 0;
+      }
+      await playCtx.resume().catch(() => undefined);
+      // Prime destination with silence so subsequent PCM buffers are audible on iOS.
+      try {
+        const silence = playCtx.createBuffer(1, 1, playCtx.sampleRate);
+        const src = playCtx.createBufferSource();
+        src.buffer = silence;
+        src.connect(playCtx.destination);
+        src.start(0);
+      } catch {
+        /* ignore */
+      }
     }
-    if (webrtcLiveRef.current.size === 0) {
-      void startRelayCapture();
+
+    const capture = relayCaptureRef.current;
+    if (capture?.ctx.state === "suspended") {
+      await capture.ctx.resume().catch(() => undefined);
+    }
+    if (!relayActiveRef.current && webrtcLiveRef.current.size === 0) {
+      await startRelayCapture();
     }
     setNeedsAudioUnlock(false);
   }, [startRelayCapture]);

@@ -168,7 +168,7 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage(WS_ROOM_EVENTS.VOICE_AUDIO)
   onVoiceAudio(
     @ConnectedSocket() client: AuthedSocket,
-    @MessageBody() body: { pcm: string },
+    @MessageBody() body: { pcm: string; sampleRate?: number },
   ) {
     if (!client.user) return;
     const data = client.data as VoiceSocketData;
@@ -176,12 +176,16 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!roomCode || typeof body?.pcm !== 'string' || body.pcm.length === 0) {
       return;
     }
-    // Cap ~8KB base64 (~4KB PCM) to avoid abuse
-    if (body.pcm.length > 12_000) return;
+    // Cap ~12KB base64 to avoid abuse
+    if (body.pcm.length > 16_000) return;
 
     client.to(`voice:${roomCode}`).emit(WS_ROOM_EVENTS.VOICE_AUDIO, {
       fromUserId: client.user.id,
       pcm: body.pcm,
+      sampleRate:
+        typeof body.sampleRate === 'number' && body.sampleRate > 0
+          ? body.sampleRate
+          : 16000,
     });
   }
 
