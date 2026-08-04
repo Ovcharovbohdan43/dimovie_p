@@ -27,6 +27,34 @@ interface RoomHeaderProps {
   voiceSlot?: ReactNode;
 }
 
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through */
+  }
+
+  try {
+    const input = document.createElement("textarea");
+    input.value = text;
+    input.setAttribute("readonly", "");
+    input.style.position = "fixed";
+    input.style.opacity = "0";
+    input.style.left = "-9999px";
+    document.body.appendChild(input);
+    input.select();
+    input.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(input);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export function RoomHeader({
   room,
   code,
@@ -43,14 +71,37 @@ export function RoomHeader({
   voiceSlot,
 }: RoomHeaderProps) {
   const [copied, setCopied] = useState(false);
+  const [shareError, setShareError] = useState(false);
   const [participantsOpen, setParticipantsOpen] = useState(false);
 
   const handleShare = async () => {
-    await navigator.clipboard.writeText(
-      `${window.location.origin}/join/${code}`,
-    );
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const url = `${window.location.origin}/join/${code}`;
+    setShareError(false);
+
+    try {
+      if (typeof navigator.share === "function") {
+        await navigator.share({
+          title: "DiMovie party",
+          text: `Join my DiMovie room ${code}`,
+          url,
+        });
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 2000);
+        return;
+      }
+    } catch (err) {
+      // User dismissed the share sheet — not an error.
+      if (err instanceof DOMException && err.name === "AbortError") return;
+    }
+
+    const ok = await copyText(url);
+    if (ok) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } else {
+      setShareError(true);
+      window.setTimeout(() => setShareError(false), 2500);
+    }
   };
 
   const videoTitle =
@@ -65,6 +116,8 @@ export function RoomHeader({
     : connected
       ? "Live"
       : "Off";
+
+  const shareLabel = shareError ? "Failed" : copied ? "Copied" : "Share";
 
   return (
     <>
@@ -138,12 +191,20 @@ export function RoomHeader({
 
             <button
               type="button"
-              onClick={handleShare}
-              aria-label="Share room"
-              className="inline-flex h-8 items-center gap-1.5 border border-white/10 bg-white/[0.04] px-2 text-[11px] font-medium text-white/75 transition hover:bg-white/10 hover:text-white"
+              onClick={() => void handleShare()}
+              aria-label={shareLabel}
+              aria-live="polite"
+              className={cn(
+                "inline-flex h-8 items-center gap-1.5 border px-2 text-[11px] font-medium transition",
+                shareError
+                  ? "border-[#e50914]/50 bg-[#e50914]/15 text-[#ff6b73]"
+                  : copied
+                    ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                    : "border-white/10 bg-white/[0.04] text-white/75 hover:bg-white/10 hover:text-white",
+              )}
             >
               <ShareMark className="size-3.5 opacity-70" />
-              <span className="hidden sm:inline">{copied ? "Copied" : "Share"}</span>
+              <span>{shareLabel}</span>
             </button>
           </div>
         </div>

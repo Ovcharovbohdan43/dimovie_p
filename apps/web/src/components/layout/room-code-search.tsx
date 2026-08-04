@@ -46,29 +46,44 @@ export function RoomCodeSearch({ className, compact = false }: RoomCodeSearchPro
           onClick={() => setOpen((v) => !v)}
           className="rounded-full p-2 text-white/70 hover:bg-white/10 hover:text-white"
           aria-label="Search by room code"
+          aria-expanded={open}
         >
           <Search className="size-5" />
         </button>
         {open && (
-          <form
-            onSubmit={handleSubmit}
-            className="absolute right-0 top-full z-50 mt-2 w-56 rounded-lg border border-white/10 bg-[#181818] p-3 shadow-xl"
-          >
-            <Input
-              value={code}
-              onChange={(e) => {
-                setCode(normalizeRoomCode(e.target.value));
+          <>
+            <button
+              type="button"
+              aria-label="Close search"
+              className="fixed inset-0 z-40 bg-black/50"
+              onClick={() => {
+                setOpen(false);
                 setError(null);
               }}
-              placeholder="Room code"
-              className="h-9 border-white/10 bg-white/5 uppercase tracking-widest"
-              autoFocus
-              maxLength={ROOM_CODE_LENGTH}
             />
-            {error && (
-              <p className="mt-2 text-xs text-[#e50914]">{error}</p>
-            )}
-          </form>
+            <form
+              onSubmit={handleSubmit}
+              className="fixed left-3 right-3 top-[3.75rem] z-50 rounded-lg border border-white/10 bg-[#181818] p-3 shadow-xl sm:left-auto sm:right-4 sm:w-72"
+            >
+              <Input
+                value={code}
+                onChange={(e) => {
+                  setCode(normalizeRoomCode(e.target.value));
+                  setError(null);
+                }}
+                placeholder="Room code"
+                className="h-10 w-full border-white/10 bg-white/5 uppercase tracking-widest"
+                autoFocus
+                maxLength={ROOM_CODE_LENGTH}
+                inputMode="text"
+                autoCapitalize="characters"
+                autoCorrect="off"
+              />
+              {error && (
+                <p className="mt-2 text-xs text-[#e50914]">{error}</p>
+              )}
+            </form>
+          </>
         )}
       </div>
     );

@@ -136,6 +136,10 @@ export default function RoomPage({
 
   const [chatOpen, setChatOpen] = useState(false);
 
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+
+  const seenChatCountRef = useRef(0);
+
   const [broadcastEnded, setBroadcastEnded] = useState(false);
 
   const [endedMessage, setEndedMessage] = useState("The host ended the stream");
@@ -573,6 +577,28 @@ export default function RoomPage({
 
 
   const isOwner = me.data?.id === room.data?.owner.id;
+
+  useEffect(() => {
+    if (chatOpen) {
+      seenChatCountRef.current = messages.length;
+      setUnreadChatCount(0);
+      return;
+    }
+
+    if (messages.length <= seenChatCountRef.current) {
+      seenChatCountRef.current = messages.length;
+      return;
+    }
+
+    const fresh = messages.slice(seenChatCountRef.current);
+    seenChatCountRef.current = messages.length;
+    const fromOthers = fresh.filter(
+      (msg) => msg.userId !== me.data?.id,
+    ).length;
+    if (fromOthers > 0) {
+      setUnreadChatCount((count) => count + fromOthers);
+    }
+  }, [messages, chatOpen, me.data?.id]);
 
   const myRole = participants.find((p) => p.userId === me.data?.id)?.role;
   // Owner always; any joined member once role arrives; allow briefly after join
@@ -1075,7 +1101,11 @@ export default function RoomPage({
 
         <Button
 
-          onClick={() => setChatOpen(true)}
+          onClick={() => {
+            setChatOpen(true);
+            setUnreadChatCount(0);
+            seenChatCountRef.current = messages.length;
+          }}
 
           className="fixed bottom-5 right-5 z-40 size-14 rounded-full bg-[#e50914] shadow-[0_8px_32px_rgba(229,9,20,0.4)] hover:bg-[#f40612] lg:hidden"
 
@@ -1085,11 +1115,11 @@ export default function RoomPage({
 
           <MessageCircle className="size-6" />
 
-          {messages.length > 0 && (
+          {unreadChatCount > 0 && (
 
             <span className="absolute -right-0.5 -top-0.5 flex size-5 items-center justify-center rounded-full bg-white text-[10px] font-bold text-[#e50914]">
 
-              {messages.length > 9 ? "9+" : messages.length}
+              {unreadChatCount > 9 ? "9+" : unreadChatCount}
 
             </span>
 
