@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
-import { getCorsOrigins } from './common/cors';
+import { getCorsOptions } from './common/cors';
 import { RedisIoAdapter } from './realtime/redis-io.adapter';
 
 async function bootstrap() {
@@ -26,10 +26,7 @@ async function bootstrap() {
 
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(cookieParser());
-  app.enableCors({
-    origin: getCorsOrigins(),
-    credentials: true,
-  });
+  app.enableCors(getCorsOptions());
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

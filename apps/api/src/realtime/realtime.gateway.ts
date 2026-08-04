@@ -20,13 +20,10 @@ import { ModerationService } from '../moderation/moderation.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { AnalyticsService } from '../analytics/analytics.service';
-import { getCorsOrigins } from '../common/cors';
+import { getCorsOptions } from '../common/cors';
 
 @WebSocketGateway({
-  cors: {
-    origin: getCorsOrigins(),
-    credentials: true,
-  },
+  cors: getCorsOptions(),
   transports: ['websocket', 'polling'],
   pingInterval: 10000,
   pingTimeout: 5000,
@@ -59,7 +56,11 @@ export class RealtimeGateway
       const user = await this.wsAuth.authenticate(client);
       client.user = user;
       client.data.userId = user.id;
-    } catch {
+      this.logger.log(`ws connected user=${user.id}`);
+    } catch (err) {
+      this.logger.warn(
+        `ws auth failed: ${err instanceof Error ? err.message : 'unauthorized'}`,
+      );
       client.emit(WS_ROOM_EVENTS.ERROR, { message: 'Unauthorized' });
       client.disconnect(true);
     }
@@ -117,7 +118,8 @@ export class RealtimeGateway
     }
 
     client.roomCode = roomCode;
-    client.join(`room:${roomCode}`);
+    await client.join(`room:${roomCode}`);
+    this.logger.log(`ws join room=${roomCode} user=${client.user.id}`);
 
     const presenceKey = `room:${roomCode}:presence`;
     await this.redis.client.hset(presenceKey, client.id, client.user.id);
@@ -176,7 +178,16 @@ export class RealtimeGateway
     @ConnectedSocket() client: AuthedSocket,
     @MessageBody() body: { content: string },
   ) {
-    if (!client.roomCode) return;
+    if (!client.roomCode) {
+      this.logger.warn(
+        `chat:message dropped — socket not in a room user=${client.user?.id}`,
+      );
+      client.emit(WS_ROOM_EVENTS.ERROR, {
+        message: 'Not connected to the room yet',
+        scope: 'chat',
+      });
+      return;
+    }
 
     const room = await this.prisma.room.findUnique({
       where: { roomCode: client.roomCode },
@@ -194,7 +205,9 @@ export class RealtimeGateway
 
       switch (result.kind) {
         case 'broadcast':
-          this.server
+          // Echo to sender first, then room (covers Redis/adapter edge cases)
+          client.emit(WS_ROOM_EVENTS.CHAT_MESSAGE, result.message);
+          client
             .to(`room:${client.roomCode}`)
             .emit(WS_ROOM_EVENTS.CHAT_MESSAGE, result.message);
           break;

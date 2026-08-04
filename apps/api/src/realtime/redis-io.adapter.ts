@@ -3,7 +3,7 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
 import type { ServerOptions } from 'socket.io';
-import { getCorsOrigins } from '../common/cors';
+import { getCorsOptions } from '../common/cors';
 
 /**
  * Socket.IO Redis adapter so room broadcasts work across Railway replicas.
@@ -58,15 +58,9 @@ export class RedisIoAdapter extends IoAdapter {
   }
 
   createIOServer(port: number, options?: ServerOptions) {
-    const corsFromOptions =
-      options?.cors && typeof options.cors === 'object' ? options.cors : {};
     const server = super.createIOServer(port, {
       ...options,
-      cors: {
-        ...corsFromOptions,
-        origin: getCorsOrigins(),
-        credentials: true,
-      },
+      cors: getCorsOptions(),
     });
 
     if (this.adapterConstructor) {

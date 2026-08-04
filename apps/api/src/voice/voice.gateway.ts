@@ -14,7 +14,7 @@ import type { AuthedSocket } from '../realtime/ws-auth.service';
 import { WsAuthService } from '../realtime/ws-auth.service';
 import { VoiceService } from './voice.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { getCorsOrigins } from '../common/cors';
+import { getCorsOptions } from '../common/cors';
 
 interface VoicePeer {
   roomCode: string;
@@ -24,10 +24,7 @@ interface VoicePeer {
 
 @WebSocketGateway({
   namespace: '/voice',
-  cors: {
-    origin: getCorsOrigins(),
-    credentials: true,
-  },
+  cors: getCorsOptions(),
 })
 export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()

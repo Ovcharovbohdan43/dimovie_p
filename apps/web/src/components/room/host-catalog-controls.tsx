@@ -29,9 +29,8 @@ export function HostCatalogControls({ room, onUpdated }: HostCatalogControlsProp
 
   const loadCatalog = useMutation({
     mutationFn: () =>
-      api<CatalogInfo>("/catalog/rezka/parse", {
+      api<CatalogInfo>("/api/catalog/rezka/parse", {
         method: "POST",
-        direct: true,
         body: JSON.stringify({ url: catalogUrl }),
       }),
     onSuccess: (data) => {
@@ -61,9 +60,8 @@ export function HostCatalogControls({ room, onUpdated }: HostCatalogControlsProp
     mutationFn: async () => {
       if (!catalog) throw new Error("Catalog not loaded");
 
-      const stream = await api<CatalogStreamResult>("/catalog/rezka/stream", {
+      const stream = await api<CatalogStreamResult>("/api/catalog/rezka/stream", {
         method: "POST",
-        direct: true,
         body: JSON.stringify({
           catalogUrl: catalog.catalogUrl,
           translationId,

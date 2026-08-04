@@ -51,16 +51,24 @@ export function clearToken() {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 type FetchApiOptions = RequestInit & {
-  /** Hit Railway API directly (skip Next rewrite). Use for Rezka parse/stream. */
+  /** Hit Railway API directly (skip Next rewrite). */
   direct?: boolean;
+  /**
+   * Hit this Next.js app (no `/backend` prefix).
+   * Used for `/api/catalog/*` long proxies and runtime config.
+   */
+  sameOrigin?: boolean;
 };
 
 async function fetchApi(
   path: string,
   options: FetchApiOptions = {},
 ): Promise<Response> {
-  const { direct, ...init } = options;
-  const url = `${getApiUrl(direct ? "direct" : "proxy")}${path}`;
+  const { direct, sameOrigin, ...init } = options;
+  const useSameOrigin = sameOrigin || path.startsWith("/api/");
+  const url = useSameOrigin
+    ? path
+    : `${getApiUrl(direct ? "direct" : "proxy")}${path}`;
   const method = (init.method ?? "GET").toUpperCase();
   const maxAttempts = method === "GET" ? 3 : 1;
 

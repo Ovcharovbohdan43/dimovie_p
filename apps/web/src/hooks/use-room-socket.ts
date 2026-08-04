@@ -9,7 +9,7 @@ import type {
   ChatMessagePayload,
   RoomParticipant,
 } from "@dimovie/shared";
-import { API_URL, WS_URL } from "@/lib/api";
+import { getRuntimeConfig } from "@/lib/runtime-config";
 
 interface Participant extends RoomParticipant {}
 
@@ -38,11 +38,6 @@ interface UseRoomSocketOptions {
   onRoomClosed?: (payload: { message: string }) => void;
   onChatCooldown?: (waitSeconds: number) => void;
   onChatError?: (message: string) => void;
-}
-
-function getSocketUrl(): string {
-  if (typeof window === "undefined") return API_URL;
-  return WS_URL || API_URL;
 }
 
 export function useRoomSocket({
@@ -124,113 +119,124 @@ export function useRoomSocket({
       return;
     }
 
-    const socket = io(getSocketUrl(), {
-      transports: ["polling", "websocket"],
-      auth: { token },
-      withCredentials: true,
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 500,
-      reconnectionDelayMax: 3000,
-    });
+    let cancelled = false;
+    let socket: Socket | null = null;
 
-    socket.on("connect", () => {
-      setConnected(true);
-      setReconnecting(false);
-      emitJoin(socket);
-    });
+    void (async () => {
+      const { wsUrl } = await getRuntimeConfig();
+      if (cancelled) return;
 
-    socket.on("disconnect", () => {
-      setConnected(false);
-      setRoomJoined(false);
-      roomJoinedRef.current = false;
-      setReconnecting(true);
-    });
+      socket = io(wsUrl, {
+        transports: ["polling", "websocket"],
+        auth: { token },
+        withCredentials: true,
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 500,
+        reconnectionDelayMax: 3000,
+      });
 
-    socket.on("connect_error", (err) => {
-      console.warn("[room-socket] connect_error:", err.message);
-      setReconnecting(true);
-    });
+      socket.on("connect", () => {
+        setConnected(true);
+        setReconnecting(false);
+        emitJoin(socket!);
+      });
 
-    socket.io.on("reconnect", () => {
-      setReconnecting(false);
-      emitJoin(socket);
-    });
+      socket.on("disconnect", () => {
+        setConnected(false);
+        setRoomJoined(false);
+        roomJoinedRef.current = false;
+        setReconnecting(true);
+      });
 
-    socket.on(WS_ROOM_EVENTS.JOINED, (payload: JoinedPayload) => {
-      setRoomJoined(true);
-      roomJoinedRef.current = true;
-      setReconnecting(false);
-      if (payload.syncState) onSyncStateRef.current?.(payload.syncState);
-      if (payload.participants) onParticipantsRef.current?.(payload.participants);
-      onJoinedRef.current?.(payload);
-    });
+      socket.on("connect_error", (err) => {
+        console.warn("[room-socket] connect_error:", err.message, "url=", wsUrl);
+        setReconnecting(true);
+      });
 
-    socket.on(WS_ROOM_EVENTS.SYNC_STATE, (state: SyncStatePayload) => {
-      onSyncStateRef.current?.(state);
-    });
+      socket.io.on("reconnect", () => {
+        setReconnecting(false);
+        emitJoin(socket!);
+      });
 
-    socket.on(WS_ROOM_EVENTS.CHAT_MESSAGE, (msg: ChatMessagePayload) => {
-      onChatMessageRef.current?.(msg);
-    });
+      socket.on(WS_ROOM_EVENTS.JOINED, (payload: JoinedPayload) => {
+        setRoomJoined(true);
+        roomJoinedRef.current = true;
+        setReconnecting(false);
+        if (payload.syncState) onSyncStateRef.current?.(payload.syncState);
+        if (payload.participants) onParticipantsRef.current?.(payload.participants);
+        onJoinedRef.current?.(payload);
+      });
 
-    socket.on(WS_ROOM_EVENTS.CHAT_COOLDOWN, (payload: { waitSeconds: number }) => {
-      applyChatCooldown(payload.waitSeconds);
-      onChatCooldownRef.current?.(payload.waitSeconds);
-    });
+      socket.on(WS_ROOM_EVENTS.SYNC_STATE, (state: SyncStatePayload) => {
+        onSyncStateRef.current?.(state);
+      });
 
-    socket.on(WS_ROOM_EVENTS.PARTICIPANTS, (participants: Participant[]) => {
-      onParticipantsRef.current?.(participants);
-    });
+      socket.on(WS_ROOM_EVENTS.CHAT_MESSAGE, (msg: ChatMessagePayload) => {
+        onChatMessageRef.current?.(msg);
+      });
 
-    socket.on(WS_ROOM_EVENTS.REACTION, (data: {
-      userId: string;
-      displayName: string;
-      emoji: string;
-    }) => {
-      onReactionRef.current?.(data);
-    });
+      socket.on(WS_ROOM_EVENTS.CHAT_COOLDOWN, (payload: { waitSeconds: number }) => {
+        applyChatCooldown(payload.waitSeconds);
+        onChatCooldownRef.current?.(payload.waitSeconds);
+      });
 
-    socket.on(WS_ROOM_EVENTS.REMOVED, (payload: RemovedPayload) => {
-      onRemovedRef.current?.(payload);
-    });
+      socket.on(WS_ROOM_EVENTS.PARTICIPANTS, (participants: Participant[]) => {
+        onParticipantsRef.current?.(participants);
+      });
 
-    socket.on(WS_ROOM_EVENTS.CLOSED, (payload: { message: string }) => {
-      onRoomClosedRef.current?.(payload);
-    });
+      socket.on(WS_ROOM_EVENTS.REACTION, (data: {
+        userId: string;
+        displayName: string;
+        emoji: string;
+      }) => {
+        onReactionRef.current?.(data);
+      });
 
-    socket.on(WS_ROOM_EVENTS.ERROR, (payload?: { message?: string; scope?: string }) => {
-      const message = payload?.message ?? "";
-      const isChatError =
-        payload?.scope === "chat" ||
-        /wait.*seconds|rate limit|Empty message|Chat error/i.test(message);
-      if (isChatError) {
-        if (message) onChatErrorRef.current?.(message);
-        return;
-      }
+      socket.on(WS_ROOM_EVENTS.REMOVED, (payload: RemovedPayload) => {
+        onRemovedRef.current?.(payload);
+      });
 
-      setRoomJoined(false);
-      roomJoinedRef.current = false;
-      const blocked = /blocked|banned|Not a participant/i.test(message);
-      if (blocked) {
-        onRemovedRef.current?.({
-          action: /banned|blocked/i.test(message) ? "banned" : "kicked",
-          message:
-            message === "You are blocked by the host"
-              ? "You are blocked by this host"
-              : message === "You are banned from this room"
-                ? "You are banned from this room"
-                : message || "Room access denied",
-        });
-        return;
-      }
-      setTimeout(() => emitJoin(socket), 1000);
-    });
+      socket.on(WS_ROOM_EVENTS.CLOSED, (payload: { message: string }) => {
+        onRoomClosedRef.current?.(payload);
+      });
 
-    socketRef.current = socket;
+      socket.on(WS_ROOM_EVENTS.ERROR, (payload?: { message?: string; scope?: string }) => {
+        const message = payload?.message ?? "";
+        const isChatError =
+          payload?.scope === "chat" ||
+          /wait.*seconds|rate limit|Empty message|Chat error/i.test(message);
+        if (isChatError) {
+          if (message) onChatErrorRef.current?.(message);
+          return;
+        }
+
+        setRoomJoined(false);
+        roomJoinedRef.current = false;
+        const blocked = /blocked|banned|Not a participant/i.test(message);
+        if (blocked) {
+          onRemovedRef.current?.({
+            action: /banned|blocked/i.test(message) ? "banned" : "kicked",
+            message:
+              message === "You are blocked by the host"
+                ? "You are blocked by this host"
+                : message === "You are banned from this room"
+                  ? "You are banned from this room"
+                  : message || "Room access denied",
+          });
+          return;
+        }
+        setTimeout(() => {
+          if (socket?.connected) emitJoin(socket);
+        }, 1000);
+      });
+
+      socketRef.current = socket;
+    })();
 
     return () => {
-      socket.disconnect();
+      cancelled = true;
+      socket?.disconnect();
       socketRef.current = null;
       setConnected(false);
       setRoomJoined(false);
@@ -248,12 +254,12 @@ export function useRoomSocket({
   const sendChat = useCallback(
     (content: string): boolean => {
       if (chatCooldownRef.current > 0) return false;
-      const socket = socketRef.current;
-      if (!socket?.connected || !roomJoinedRef.current) {
+      const sock = socketRef.current;
+      if (!sock?.connected || !roomJoinedRef.current) {
         onChatErrorRef.current?.("Not connected to the room yet");
         return false;
       }
-      socket.emit(WS_ROOM_EVENTS.CHAT_MESSAGE, { content });
+      sock.emit(WS_ROOM_EVENTS.CHAT_MESSAGE, { content });
       applyChatCooldown(Math.ceil(CHAT_MIN_INTERVAL_MS / 1000));
       return true;
     },
