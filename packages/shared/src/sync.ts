@@ -51,4 +51,6 @@ export const WS_ROOM_EVENTS = {
   VOICE_JOIN: "voice:join",
   VOICE_LEAVE: "voice:leave",
   VOICE_PEERS: "voice:peers",
+  /** PCM fallback when WebRTC ICE/TURN cannot traverse NAT */
+  VOICE_AUDIO: "voice:audio",
 } as const;

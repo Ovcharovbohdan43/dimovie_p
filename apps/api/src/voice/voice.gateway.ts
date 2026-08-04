@@ -165,6 +165,26 @@ export class VoiceGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  @SubscribeMessage(WS_ROOM_EVENTS.VOICE_AUDIO)
+  onVoiceAudio(
+    @ConnectedSocket() client: AuthedSocket,
+    @MessageBody() body: { pcm: string },
+  ) {
+    if (!client.user) return;
+    const data = client.data as VoiceSocketData;
+    const roomCode = data.voiceRoomCode;
+    if (!roomCode || typeof body?.pcm !== 'string' || body.pcm.length === 0) {
+      return;
+    }
+    // Cap ~8KB base64 (~4KB PCM) to avoid abuse
+    if (body.pcm.length > 12_000) return;
+
+    client.to(`voice:${roomCode}`).emit(WS_ROOM_EVENTS.VOICE_AUDIO, {
+      fromUserId: client.user.id,
+      pcm: body.pcm,
+    });
+  }
+
   private async listPeers(roomCode: string) {
     const sockets = await this.server.in(`voice:${roomCode}`).fetchSockets();
     const peers: { userId: string; displayName: string; socketId: string }[] =

@@ -164,6 +164,33 @@ function resumeAllRemoteAudio(audioEls: Map<string, HTMLAudioElement>) {
   }
 }
 
+const RELAY_SAMPLE_RATE = 16000;
+const RELAY_BUFFER_SIZE = 2048;
+
+type RelayCapture = {
+  ctx: AudioContext;
+  processor: ScriptProcessorNode;
+  source: MediaStreamAudioSourceNode;
+  silent: GainNode;
+};
+
+function pcmToBase64(pcm: Int16Array): string {
+  const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function base64ToPcm(b64: string): Int16Array {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Int16Array(bytes.buffer);
+}
+
 export function useVoiceChat({
   roomCode,
   token,
@@ -180,6 +207,13 @@ export function useVoiceChat({
   );
   const iceServersRef = useRef<RTCIceServer[]>(DEFAULT_ICE_SERVERS);
   const currentUserIdRef = useRef(currentUserId);
+  const mutedRef = useRef(false);
+  const webrtcLiveRef = useRef<Set<string>>(new Set());
+  const relayActiveRef = useRef(false);
+  const relayCaptureRef = useRef<RelayCapture | null>(null);
+  const relayPlayCtxRef = useRef<AudioContext | null>(null);
+  const relayNextTimeRef = useRef(0);
+  const relayTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     currentUserIdRef.current = currentUserId;
@@ -190,8 +224,115 @@ export function useVoiceChat({
   const [voicePeers, setVoicePeers] = useState<VoicePeerInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
+  const [usingRelay, setUsingRelay] = useState(false);
 
   const iceRestartingRef = useRef<Set<string>>(new Set());
+
+  const stopRelayCapture = useCallback(() => {
+    relayActiveRef.current = false;
+    setUsingRelay(false);
+    const capture = relayCaptureRef.current;
+    if (capture) {
+      try {
+        capture.processor.disconnect();
+        capture.source.disconnect();
+        capture.silent.disconnect();
+        void capture.ctx.close();
+      } catch {
+        /* ignore */
+      }
+      relayCaptureRef.current = null;
+    }
+    if (relayTimerRef.current != null) {
+      window.clearTimeout(relayTimerRef.current);
+      relayTimerRef.current = null;
+    }
+  }, []);
+
+  const playRelayPcm = useCallback(async (pcm: Int16Array) => {
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (
+          window as unknown as {
+            webkitAudioContext?: typeof AudioContext;
+          }
+        ).webkitAudioContext;
+      if (!AudioCtx) return;
+
+      let ctx = relayPlayCtxRef.current;
+      if (!ctx || ctx.state === "closed") {
+        ctx = new AudioCtx({ sampleRate: RELAY_SAMPLE_RATE });
+        relayPlayCtxRef.current = ctx;
+        relayNextTimeRef.current = 0;
+      }
+      if (ctx.state === "suspended") await ctx.resume();
+
+      const floats = new Float32Array(pcm.length);
+      for (let i = 0; i < pcm.length; i++) {
+        floats[i] = pcm[i]! / 32768;
+      }
+      const buffer = ctx.createBuffer(1, floats.length, RELAY_SAMPLE_RATE);
+      buffer.copyToChannel(floats, 0);
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(ctx.destination);
+      const startAt = Math.max(ctx.currentTime + 0.02, relayNextTimeRef.current);
+      src.start(startAt);
+      relayNextTimeRef.current = startAt + buffer.duration;
+    } catch {
+      /* ignore decode glitches */
+    }
+  }, []);
+
+  const startRelayCapture = useCallback(async () => {
+    if (relayActiveRef.current || !localStreamRef.current || !socketRef.current) {
+      return;
+    }
+    if (webrtcLiveRef.current.size > 0) return;
+
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (
+          window as unknown as {
+            webkitAudioContext?: typeof AudioContext;
+          }
+        ).webkitAudioContext;
+      if (!AudioCtx) return;
+
+      const ctx = new AudioCtx({ sampleRate: RELAY_SAMPLE_RATE });
+      if (ctx.state === "suspended") await ctx.resume();
+      const source = ctx.createMediaStreamSource(localStreamRef.current);
+      const processor = ctx.createScriptProcessor(RELAY_BUFFER_SIZE, 1, 1);
+      const silent = ctx.createGain();
+      silent.gain.value = 0;
+
+      processor.onaudioprocess = (event) => {
+        if (!relayActiveRef.current || mutedRef.current) return;
+        if (webrtcLiveRef.current.size > 0) return;
+        const socket = socketRef.current;
+        if (!socket) return;
+        const input = event.inputBuffer.getChannelData(0);
+        const pcm = new Int16Array(input.length);
+        for (let i = 0; i < input.length; i++) {
+          const s = Math.max(-1, Math.min(1, input[i]!));
+          pcm[i] = s < 0 ? (s * 0x8000) | 0 : (s * 0x7fff) | 0;
+        }
+        socket.emit(WS_ROOM_EVENTS.VOICE_AUDIO, { pcm: pcmToBase64(pcm) });
+      };
+
+      source.connect(processor);
+      processor.connect(silent);
+      silent.connect(ctx.destination);
+
+      relayCaptureRef.current = { ctx, processor, source, silent };
+      relayActiveRef.current = true;
+      setUsingRelay(true);
+    } catch {
+      /* relay optional */
+    }
+  }, []);
 
   const cleanupPeer = useCallback((userId: string) => {
     peersRef.current.get(userId)?.close();
@@ -200,9 +341,11 @@ export function useVoiceChat({
     audioElsRef.current.delete(userId);
     pendingCandidatesRef.current.delete(userId);
     iceRestartingRef.current.delete(userId);
+    webrtcLiveRef.current.delete(userId);
   }, []);
 
   const cleanupAll = useCallback(() => {
+    stopRelayCapture();
     for (const userId of peersRef.current.keys()) {
       cleanupPeer(userId);
     }
@@ -211,11 +354,16 @@ export function useVoiceChat({
     socketRef.current?.emit(WS_ROOM_EVENTS.VOICE_LEAVE);
     socketRef.current?.disconnect();
     socketRef.current = null;
+    webrtcLiveRef.current.clear();
+    if (relayPlayCtxRef.current) {
+      void relayPlayCtxRef.current.close().catch(() => undefined);
+      relayPlayCtxRef.current = null;
+    }
     setConnected(false);
     setVoicePeers([]);
     setNeedsAudioUnlock(false);
     pendingCandidatesRef.current.clear();
-  }, [cleanupPeer]);
+  }, [cleanupPeer, stopRelayCapture]);
 
   const flushPendingCandidates = useCallback(
     async (userId: string, pc: RTCPeerConnection) => {
@@ -275,23 +423,34 @@ export function useVoiceChat({
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "connected") {
           iceRestartingRef.current.delete(targetUserId);
+          webrtcLiveRef.current.add(targetUserId);
+          stopRelayCapture();
           resumeAllRemoteAudio(audioElsRef.current);
           return;
         }
 
+        if (
+          pc.connectionState === "disconnected" ||
+          pc.connectionState === "failed"
+        ) {
+          webrtcLiveRef.current.delete(targetUserId);
+        }
+
         if (pc.connectionState === "closed") {
           cleanupPeer(targetUserId);
+          void startRelayCapture();
           return;
         }
 
         if (pc.connectionState !== "failed") return;
         if (iceRestartingRef.current.has(targetUserId)) {
-          cleanupPeer(targetUserId);
+          void startRelayCapture();
           return;
         }
 
         const localUserId = currentUserIdRef.current;
         if (!localUserId || !shouldInitiateOffer(localUserId, targetUserId)) {
+          void startRelayCapture();
           return;
         }
 
@@ -306,7 +465,7 @@ export function useVoiceChat({
               signal: { sdp: pc.localDescription },
             });
           } catch {
-            cleanupPeer(targetUserId);
+            void startRelayCapture();
           }
         })();
       };
@@ -320,7 +479,7 @@ export function useVoiceChat({
         });
       }
     },
-    [cleanupPeer],
+    [cleanupPeer, startRelayCapture, stopRelayCapture],
   );
 
   const handleSignal = useCallback(
@@ -491,6 +650,17 @@ export function useVoiceChat({
         },
       );
 
+      socket.on(
+        WS_ROOM_EVENTS.VOICE_AUDIO,
+        (payload: { fromUserId: string; pcm: string }) => {
+          const me = currentUserIdRef.current;
+          if (!payload?.pcm || payload.fromUserId === me) return;
+          // Prefer WebRTC when that peer already has a live media path.
+          if (webrtcLiveRef.current.has(payload.fromUserId)) return;
+          void playRelayPcm(base64ToPcm(payload.pcm));
+        },
+      );
+
       socket.on(WS_ROOM_EVENTS.ERROR, (payload?: { message?: string }) => {
         setError(
           payload?.message ??
@@ -504,6 +674,17 @@ export function useVoiceChat({
         roomCode: roomCode.toUpperCase(),
       });
       setConnected(true);
+
+      // If ICE/TURN cannot complete quickly (common on mobile NATs), fall back
+      // to Socket.IO PCM relay so voice still works on Railway without TURN.
+      if (relayTimerRef.current != null) {
+        window.clearTimeout(relayTimerRef.current);
+      }
+      relayTimerRef.current = window.setTimeout(() => {
+        if (webrtcLiveRef.current.size === 0) {
+          void startRelayCapture();
+        }
+      }, 2500);
     } catch (err) {
       setError(
         err instanceof Error && /denied|notallowed|permission/i.test(err.message)
@@ -522,6 +703,8 @@ export function useVoiceChat({
     handleSignal,
     cleanupPeer,
     cleanupAll,
+    startRelayCapture,
+    playRelayPcm,
   ]);
 
   const leaveVoice = useCallback(() => {
@@ -531,13 +714,20 @@ export function useVoiceChat({
   const unlockRemoteAudio = useCallback(async () => {
     await unlockAudioPlayback();
     resumeAllRemoteAudio(audioElsRef.current);
+    if (relayPlayCtxRef.current?.state === "suspended") {
+      await relayPlayCtxRef.current.resume().catch(() => undefined);
+    }
+    if (webrtcLiveRef.current.size === 0) {
+      void startRelayCapture();
+    }
     setNeedsAudioUnlock(false);
-  }, []);
+  }, [startRelayCapture]);
 
   const toggleMute = useCallback(() => {
     const stream = localStreamRef.current;
     if (!stream) return;
     const next = !muted;
+    mutedRef.current = next;
     stream.getAudioTracks().forEach((track) => {
       track.enabled = !next;
     });
@@ -564,6 +754,7 @@ export function useVoiceChat({
     voicePeers,
     error,
     needsAudioUnlock,
+    usingRelay,
     joinVoice,
     leaveVoice,
     toggleMute,
