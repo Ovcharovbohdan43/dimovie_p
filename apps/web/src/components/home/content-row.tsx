@@ -1,8 +1,8 @@
 "use client";
 
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { RailArrow } from "@/components/home/marks";
 
 interface ContentRowProps {
   title: string;
@@ -12,40 +12,92 @@ interface ContentRowProps {
 
 export function ContentRow({ title, children, className }: ContentRowProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
+
+  const updateEdges = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    setCanLeft(el.scrollLeft > 4);
+    setCanRight(max > 4 && el.scrollLeft < max - 4);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    updateEdges();
+    el.addEventListener("scroll", updateEdges, { passive: true });
+    const ro = new ResizeObserver(updateEdges);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", updateEdges);
+      ro.disconnect();
+    };
+  }, [updateEdges, children]);
 
   const scroll = (dir: "left" | "right") => {
-    if (!scrollRef.current) return;
-    const amount = scrollRef.current.clientWidth * 0.75;
-    scrollRef.current.scrollBy({
+    const el = scrollRef.current;
+    if (!el) return;
+    const amount = Math.min(el.clientWidth * 0.82, 720);
+    el.scrollBy({
       left: dir === "left" ? -amount : amount,
       behavior: "smooth",
     });
   };
 
   return (
-    <section className={cn("group/row relative px-4 md:px-8 lg:px-12", className)}>
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-bold text-white md:text-xl">{title}</h2>
-        <div className="flex gap-1 opacity-0 transition group-hover/row:opacity-100">
+    <section
+      className={cn(
+        "group/row relative px-4 sm:px-6 md:px-10 lg:px-14",
+        className,
+      )}
+    >
+      <div className="mb-3 flex items-end justify-between gap-4 md:mb-4">
+        <h2 className="font-display text-lg font-semibold tracking-[-0.02em] text-white md:text-xl">
+          {title}
+        </h2>
+        <div className="hidden items-center gap-1 sm:flex">
           <button
+            type="button"
+            aria-label="Scroll left"
+            disabled={!canLeft}
             onClick={() => scroll("left")}
-            className="rounded-full bg-black/60 p-1.5 text-white hover:bg-black/80"
+            className="grid size-9 place-items-center border border-white/12 bg-black/45 text-white transition enabled:hover:border-white/30 enabled:hover:bg-black/70 disabled:opacity-25"
           >
-            <ChevronLeft className="size-5" />
+            <RailArrow direction="left" className="size-4" />
           </button>
           <button
+            type="button"
+            aria-label="Scroll right"
+            disabled={!canRight}
             onClick={() => scroll("right")}
-            className="rounded-full bg-black/60 p-1.5 text-white hover:bg-black/80"
+            className="grid size-9 place-items-center border border-white/12 bg-black/45 text-white transition enabled:hover:border-white/30 enabled:hover:bg-black/70 disabled:opacity-25"
           >
-            <ChevronRight className="size-5" />
+            <RailArrow direction="right" className="size-4" />
           </button>
         </div>
       </div>
-      <div
-        ref={scrollRef}
-        className="scrollbar-hide flex gap-3 overflow-x-auto pb-4"
-      >
-        {children}
+
+      <div className="relative">
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-y-0 left-0 z-[1] w-8 bg-gradient-to-r from-[#08080c] to-transparent transition-opacity sm:w-12",
+            canLeft ? "opacity-100" : "opacity-0",
+          )}
+        />
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-y-0 right-0 z-[1] w-8 bg-gradient-to-l from-[#08080c] to-transparent transition-opacity sm:w-12",
+            canRight ? "opacity-100" : "opacity-0",
+          )}
+        />
+        <div
+          ref={scrollRef}
+          className="scrollbar-hide flex snap-x snap-mandatory gap-2.5 overflow-x-auto pb-2 sm:gap-3 md:gap-3.5"
+        >
+          {children}
+        </div>
       </div>
     </section>
   );

@@ -5,18 +5,12 @@ import type { RoomSummary } from "@dimovie/shared";
 import { HeroBanner } from "@/components/home/hero-banner";
 import { ContentRow } from "@/components/home/content-row";
 import { RoomCard } from "@/components/home/room-card";
+import { ExperienceStory } from "@/components/home/experience-story";
+import { SyncStrip } from "@/components/home/sync-strip";
+import { FinalCta } from "@/components/home/final-cta";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/lib/api";
-import { Check } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-
-const features = [
-  "Ultra-low latency video sync (<500ms)",
-  "SFU voice chat for crystal-clear audio",
-  "Democratic playback — anyone can control",
-  "Private rooms with password protection",
-  "Real-time reactions and live chat",
-];
 
 export default function HomePage() {
   const { me } = useAuth();
@@ -32,13 +26,14 @@ export default function HomePage() {
     <>
       <HeroBanner isAuthenticated={!!me.data} />
 
-      <section className="relative -mt-16 space-y-12 pb-24">
+      <div className="relative z-[1] -mt-10 space-y-10 pb-8 sm:-mt-14 sm:space-y-14 md:space-y-16">
         {me.data && (
-          <ContentRow title="Live Public Watch Parties">
+          <ContentRow title="Live public parties">
             {publicRooms.isLoading ? (
               <>
-                <Skeleton className="h-[320px] w-[300px] flex-shrink-0" />
-                <Skeleton className="h-[320px] w-[300px] flex-shrink-0" />
+                <Skeleton className="aspect-video h-auto w-[72vw] max-w-[300px] flex-shrink-0 snap-start rounded-none sm:w-[260px]" />
+                <Skeleton className="aspect-video h-auto w-[72vw] max-w-[300px] flex-shrink-0 snap-start rounded-none sm:w-[260px]" />
+                <Skeleton className="aspect-video h-auto w-[72vw] max-w-[300px] flex-shrink-0 snap-start rounded-none sm:w-[260px]" />
               </>
             ) : publicRooms.data?.length ? (
               publicRooms.data.map((room) => (
@@ -52,30 +47,10 @@ export default function HomePage() {
           </ContentRow>
         )}
 
-        <ContentRow title="Why DiMovie">
-          <div className="flex gap-4">
-            {features.map((feature) => (
-              <div
-                key={feature}
-                className="flex w-[320px] flex-shrink-0 items-start gap-3 rounded-lg border border-white/5 bg-[#181818] p-5"
-              >
-                <Check className="mt-0.5 size-5 shrink-0 text-[#e50914]" />
-                <p className="text-sm text-white/80">{feature}</p>
-              </div>
-            ))}
-          </div>
-        </ContentRow>
-
-        <div className="mx-auto max-w-4xl px-4 text-center md:px-8">
-          <h2 className="text-2xl font-bold md:text-3xl">
-            Ready to watch together?
-          </h2>
-          <p className="mt-3 text-white/60">
-            Join thousands streaming in sync — Netflix-quality experience,
-            built for friends.
-          </p>
-        </div>
-      </section>
+        <ExperienceStory />
+        <SyncStrip />
+        <FinalCta isAuthenticated={!!me.data} />
+      </div>
     </>
   );
 }
