@@ -104,3 +104,72 @@ export function MicMark({ className }: { className?: string }) {
     </svg>
   );
 }
+
+export function VolumeMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden className={className}>
+      <path d="M4 9.5h3.2L12 5.5v13l-4.8-4H4V9.5z" strokeLinejoin="round" />
+      <path d="M15.2 9.2a3.2 3.2 0 010 5.6" strokeLinecap="square" />
+      <path d="M17.6 6.5a6.2 6.2 0 010 11" strokeLinecap="square" />
+    </svg>
+  );
+}
+
+export function VolumeMuteMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden className={className}>
+      <path d="M4 9.5h3.2L12 5.5v13l-4.8-4H4V9.5z" strokeLinejoin="round" />
+      <path d="M16 9l5 5M21 9l-5 5" strokeLinecap="square" />
+    </svg>
+  );
+}
+
+export function ExpandMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden className={className}>
+      <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" strokeLinecap="square" />
+    </svg>
+  );
+}
+
+export function CollapseMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden className={className}>
+      <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" strokeLinecap="square" />
+    </svg>
+  );
+}
+
+export function CaptionsMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden className={className}>
+      <rect x="3" y="6" width="18" height="12" rx="0" />
+      <path d="M7 12.5h3.5M13.5 12.5H17M7 15.5h2M12 15.5h5" strokeLinecap="square" />
+    </svg>
+  );
+}
+
+export function SignalMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden className={className}>
+      <circle cx="12" cy="12" r="2.25" fill="currentColor" stroke="none" />
+      <path d="M7.5 8.2a6.5 6.5 0 000 7.6M16.5 8.2a6.5 6.5 0 010 7.6" strokeLinecap="square" />
+      <path d="M4.2 5.2a11 11 0 000 13.6M19.8 5.2a11 11 0 010 13.6" strokeLinecap="square" />
+    </svg>
+  );
+}
+
+export function ChevronMark({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      aria-hidden
+      className={className}
+    >
+      <path d="M6 9l6 6 6-6" strokeLinecap="square" />
+    </svg>
+  );
+}

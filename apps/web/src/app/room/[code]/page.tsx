@@ -912,7 +912,7 @@ export default function RoomPage({
 
             ) : videoUrl ? (
 
-              <div className="relative mx-auto w-full max-w-5xl">
+              <div className="relative mx-auto w-full max-w-5xl overflow-hidden ring-1 ring-white/[0.06]">
 
                 <SyncVideoPlayer
 
@@ -934,6 +934,8 @@ export default function RoomPage({
 
                   canControl={canControlVideo}
 
+                  className="ring-0"
+
                   overlay={
                     <PlayerLiveOverlay
                       reactions={reactions}
@@ -942,6 +944,13 @@ export default function RoomPage({
                   }
 
                 />
+
+                {isOwner && isCatalogRoom && room.data && !showSetup && (
+                  <HostCatalogControls
+                    room={room.data}
+                    onUpdated={handleCatalogUpdated}
+                  />
+                )}
 
               </div>
 
@@ -978,18 +987,6 @@ export default function RoomPage({
           </div>
 
 
-
-          {isOwner && isCatalogRoom && room.data && videoUrl && !showSetup && (
-
-            <HostCatalogControls
-
-              room={room.data}
-
-              onUpdated={handleCatalogUpdated}
-
-            />
-
-          )}
 
           {isOwner && room.data && videoUrl && !showSetup && planFeatures?.roomAnalytics && (
             <RoomAnalyticsPanel

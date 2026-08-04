@@ -1,27 +1,28 @@
 "use client";
 
 import { useEffect, useRef, useId, useCallback, useState } from "react";
-import {
-  AlertCircle,
-  Maximize,
-  Minimize,
-  Settings2,
-  Subtitles,
-  Radio,
-} from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import type { SyncStatePayload } from "@dimovie/shared";
 import { parseVideoUrl } from "@/lib/video-url";
 import { useYouTubeApiReady, type YTPlayer } from "@/hooks/use-youtube-api";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { PauseMark, PlayMark } from "@/components/home/marks";
+import {
+  CaptionsMark,
+  CollapseMark,
+  ExpandMark,
+  PauseMark,
+  PlayMark,
+  SignalMark,
+  VolumeMark,
+  VolumeMuteMark,
+} from "@/components/home/marks";
 
 interface SyncVideoPlayerProps {
   url: string;
@@ -142,10 +143,13 @@ export function SyncVideoPlayer({
   const [ytDuration, setYtDuration] = useState(0);
   const [ytPlaying, setYtPlaying] = useState(false);
   const [seekValue, setSeekValue] = useState<number | null>(null);
-  const [controlsHovered, setControlsHovered] = useState(false);
+  const [controlsPinned, setControlsPinned] = useState(true);
   const [scrubbing, setScrubbing] = useState(false);
   const [videoError, setVideoError] = useState<string | null>(null);
   const [videoLoading, setVideoLoading] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const hideTimer = useRef<number | null>(null);
 
   onIntentRef.current = onIntent;
   syncStateRef.current = syncState;
@@ -471,9 +475,116 @@ export function SyncVideoPlayer({
     progressMax || 0,
   );
   const uiTime = seekValue ?? (isDirect ? directTime : isYoutube ? ytTime : (syncState?.time ?? 0));
-  const controlsVisible =
-    controlsHovered || scrubbing || seekValue !== null || !uiPlaying;
   const showProgress = (isDirect || isYoutube) && progressMax > 0;
+  const controlsVisible =
+    controlsPinned || scrubbing || seekValue !== null || !uiPlaying;
+
+  const clearHideTimer = useCallback(() => {
+    if (hideTimer.current != null) {
+      window.clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+  }, []);
+
+  const revealControls = useCallback(() => {
+    setControlsPinned(true);
+    clearHideTimer();
+  }, [clearHideTimer]);
+
+  const scheduleHideControls = useCallback(() => {
+    clearHideTimer();
+    if (scrubbing || seekValue !== null) return;
+    const playing = isDirect
+      ? directPlaying
+      : isYoutube
+        ? (syncState?.isPlaying ?? ytPlaying)
+        : (syncState?.isPlaying ?? false);
+    if (!playing) return;
+    hideTimer.current = window.setTimeout(() => {
+      setControlsPinned(false);
+    }, 2400);
+  }, [
+    clearHideTimer,
+    scrubbing,
+    seekValue,
+    isDirect,
+    isYoutube,
+    directPlaying,
+    syncState?.isPlaying,
+    ytPlaying,
+  ]);
+
+  useEffect(() => {
+    if (!uiPlaying || scrubbing || seekValue !== null) {
+      setControlsPinned(true);
+      clearHideTimer();
+      return;
+    }
+    scheduleHideControls();
+    return clearHideTimer;
+  }, [
+    uiPlaying,
+    scrubbing,
+    seekValue,
+    scheduleHideControls,
+    clearHideTimer,
+  ]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+
+      if (e.key === " " || e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        revealControls();
+        togglePlay();
+        scheduleHideControls();
+      } else if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        void (isYoutube ? toggleFullscreen() : toggleDirectFullscreen());
+      } else if (e.key === "m" || e.key === "M") {
+        if (!isDirect || !videoRef.current) return;
+        e.preventDefault();
+        const next = !videoRef.current.muted;
+        videoRef.current.muted = next;
+        setMuted(next);
+      } else if (
+        canControl &&
+        (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
+        (isYoutube || isDirect)
+      ) {
+        e.preventDefault();
+        const delta = e.key === "ArrowLeft" ? -5 : 5;
+        const raw = getTime() + delta;
+        const next =
+          progressMax > 0
+            ? Math.min(progressMax, Math.max(0, raw))
+            : Math.max(0, raw);
+        revealControls();
+        commitSeek(next);
+        scheduleHideControls();
+      }
+    };
+
+    el.addEventListener("keydown", onKeyDown);
+    return () => el.removeEventListener("keydown", onKeyDown);
+  }, [
+    revealControls,
+    scheduleHideControls,
+    togglePlay,
+    isYoutube,
+    isDirect,
+    toggleFullscreen,
+    toggleDirectFullscreen,
+    canControl,
+    progressMax,
+    getTime,
+    commitSeek,
+  ]);
 
   const handleContainerMouseLeave = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -482,10 +593,13 @@ export function SyncVideoPlayer({
       if (related instanceof Node && containerRef.current?.contains(related)) {
         return;
       }
-      setControlsHovered(false);
+      scheduleHideControls();
     },
-    [scrubbing],
+    [scrubbing, scheduleHideControls],
   );
+
+  const progressPct =
+    progressMax > 0 ? Math.min(100, (progressValue / progressMax) * 100) : 0;
 
   if (parsed.provider === "unknown") {
     return (
@@ -499,13 +613,21 @@ export function SyncVideoPlayer({
   return (
     <div
       ref={containerRef}
+      tabIndex={0}
       className={cn(
-        "group/player relative aspect-video w-full select-none overflow-hidden rounded-lg bg-black shadow-[0_24px_80px_rgba(0,0,0,0.6)] ring-1 ring-white/[0.06]",
+        "group/player relative aspect-video w-full select-none overflow-hidden bg-black outline-none ring-1 ring-white/[0.06] focus-visible:ring-[#e50914]/50",
+        uiPlaying && !controlsVisible && "cursor-none",
         className,
       )}
-      onMouseEnter={() => setControlsHovered(true)}
+      onMouseMove={() => {
+        revealControls();
+        scheduleHideControls();
+      }}
       onMouseLeave={handleContainerMouseLeave}
-      onTouchStart={() => setControlsHovered(true)}
+      onTouchStart={() => {
+        revealControls();
+        scheduleHideControls();
+      }}
     >
       {parsed.provider === "youtube" && (
         <div id={`yt-${playerId}`} className="absolute inset-0 h-full w-full" />
@@ -520,17 +642,16 @@ export function SyncVideoPlayer({
           )}
           aria-label={uiPlaying ? "Pause" : "Play"}
           disabled={!canControl}
-          onMouseEnter={() => setControlsHovered(true)}
-          onTouchStart={() => setControlsHovered(true)}
           onClick={() => {
             if (!canControl) return;
-            setControlsHovered(true);
+            revealControls();
             togglePlay();
+            scheduleHideControls();
           }}
         >
           {!uiPlaying && canControl && (
-            <span className="pointer-events-none grid size-16 place-items-center bg-[#e50914] text-white shadow-[0_16px_48px_rgba(0,0,0,0.45)] transition group-hover/player:scale-105 sm:size-[4.5rem]">
-              <PlayMark className="ml-0.5 size-7 sm:size-8" />
+            <span className="pointer-events-none grid size-14 place-items-center bg-[#e50914] text-white transition duration-200 group-hover/player:scale-[1.03] sm:size-16">
+              <PlayMark className="ml-0.5 size-6 sm:size-7" />
             </span>
           )}
         </button>
@@ -626,26 +747,26 @@ export function SyncVideoPlayer({
       {overlay}
 
       {broadcastEnded && (
-        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/80 px-6 backdrop-blur-sm">
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-[#08080c]/88 px-6">
           <div className="flex max-w-sm flex-col items-center text-center">
-            <div className="mb-4 flex size-14 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/10">
-              <Radio className="size-7 text-white/50" />
-            </div>
-            <h3 className="text-lg font-bold text-white">Stream ended</h3>
-            <p className="mt-2 text-sm text-white/60">{endedMessage}</p>
+            <SignalMark className="mb-4 size-6 text-white/35" />
+            <h3 className="font-display text-xl font-bold tracking-[-0.03em] text-white">
+              Stream ended
+            </h3>
+            <p className="mt-2 text-sm text-white/50">{endedMessage}</p>
             {onLeave && (
-              <Button
-                className="mt-6 bg-[#e50914] hover:bg-[#f40612]"
+              <button
+                type="button"
+                className="mt-6 h-10 bg-[#e50914] px-5 text-xs font-semibold uppercase tracking-[0.1em] text-white transition hover:bg-[#f40612]"
                 onClick={onLeave}
               >
                 Go home
-              </Button>
+              </button>
             )}
           </div>
         </div>
       )}
 
-      {/* Control bar — on hover, pause, or scrub */}
       <div
         className={cn(
           "absolute inset-x-0 bottom-0 z-30 transition-opacity duration-200 ease-out",
@@ -653,11 +774,11 @@ export function SyncVideoPlayer({
             ? "pointer-events-auto opacity-100"
             : "pointer-events-none opacity-0",
         )}
-        onMouseEnter={() => setControlsHovered(true)}
+        onMouseEnter={revealControls}
       >
-        <div className="player-controls-fade px-3 pb-3 pt-12 sm:px-4 sm:pb-4">
+        <div className="player-controls-fade px-3 pb-2.5 pt-16 sm:px-4 sm:pb-3">
           {showProgress && (
-            <div className="mb-3">
+            <div className="mb-2.5">
               <input
                 type="range"
                 min={0}
@@ -665,12 +786,22 @@ export function SyncVideoPlayer({
                 step={0.25}
                 value={progressValue}
                 aria-label="Playback position"
+                data-active={scrubbing || seekValue !== null ? "true" : undefined}
+                style={
+                  {
+                    "--progress": `${progressPct}%`,
+                  } as React.CSSProperties
+                }
                 className={cn(
-                  "player-progress block w-full",
-                  !canControl && "pointer-events-none opacity-70",
+                  "player-scrub block w-full",
+                  !canControl && "pointer-events-none opacity-60",
                 )}
                 disabled={!canControl}
-                onPointerDown={() => canControl && setScrubbing(true)}
+                onPointerDown={() => {
+                  if (!canControl) return;
+                  setScrubbing(true);
+                  revealControls();
+                }}
                 onChange={(e) => canControl && setSeekValue(Number(e.target.value))}
                 onPointerUp={(e) => {
                   if (!canControl) return;
@@ -679,6 +810,7 @@ export function SyncVideoPlayer({
                   setSeekValue(null);
                   setScrubbing(false);
                   e.currentTarget.blur();
+                  scheduleHideControls();
                 }}
                 onPointerCancel={() => {
                   setSeekValue(null);
@@ -694,12 +826,15 @@ export function SyncVideoPlayer({
             </div>
           )}
 
-          <div className="flex items-center gap-2 sm:gap-3">
-            <Button
-              size="icon"
+          <div className="flex items-center gap-0.5 sm:gap-1">
+            <button
+              type="button"
+              className="player-ctrl"
               onClick={(e) => {
                 e.stopPropagation();
+                revealControls();
                 togglePlay();
+                scheduleHideControls();
               }}
               disabled={!canControl}
               title={
@@ -707,98 +842,136 @@ export function SyncVideoPlayer({
                   ? uiPlaying
                     ? "Pause"
                     : "Play"
-                  : "Join the room to control playback"
+                  : "Only the host can control playback"
               }
-              className="size-9 shrink-0 bg-white/10 text-white backdrop-blur-sm hover:bg-white/20 disabled:opacity-40 sm:size-10"
             >
               {uiPlaying ? (
-                <PauseMark className="size-4 sm:size-5" />
+                <PauseMark className="size-4" />
               ) : (
-                <PlayMark className="ml-0.5 size-4 sm:size-5" />
+                <PlayMark className="ml-0.5 size-4" />
               )}
-            </Button>
+            </button>
 
-            <div className="flex min-w-0 flex-1 items-center gap-2 text-xs font-medium tabular-nums text-white/80">
-              <span>
-                {formatTime(uiTime)}
-                {showProgress && (
-                  <span className="text-white/40"> / {formatTime(progressMax)}</span>
-                )}
-              </span>
-              <span className="hidden text-white/30 sm:inline">·</span>
-              <span
-                className={cn(
-                  "hidden sm:inline",
-                  uiPlaying ? "text-emerald-400" : "text-white/50",
-                )}
-              >
-                {uiPlaying ? "Playing" : "Paused"}
-              </span>
+            <div className="min-w-0 flex-1 px-1.5 font-mono text-[11px] tabular-nums tracking-wide text-white/70 sm:px-2 sm:text-xs">
+              <span className="text-white/90">{formatTime(uiTime)}</span>
+              {showProgress && (
+                <span className="text-white/35">
+                  {" "}
+                  / {formatTime(progressMax)}
+                </span>
+              )}
             </div>
 
-            <div className="flex shrink-0 items-center gap-1">
-              {showCaptions && (
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={toggleCaptions}
-                  title="Subtitles"
-                  className={cn(
-                    "size-8 text-white/70 hover:bg-white/10 hover:text-white sm:size-9",
-                    captionsOn && "bg-white/15 text-[#00a8e1]",
-                  )}
-                >
-                  <Subtitles className="size-4" />
-                </Button>
-              )}
-
-              {showQuality && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        title="Quality"
-                        className="size-8 text-white/70 hover:bg-white/10 hover:text-white sm:size-9"
-                      >
-                        <Settings2 className="size-4" />
-                      </Button>
+            {isDirect && (
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  className="player-ctrl"
+                  title={muted || volume === 0 ? "Unmute" : "Mute"}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const el = videoRef.current;
+                    if (!el) return;
+                    if (muted || volume === 0) {
+                      el.muted = false;
+                      el.volume = volume > 0 ? volume : 0.8;
+                      setMuted(false);
+                      if (volume === 0) setVolume(0.8);
+                    } else {
+                      el.muted = true;
+                      setMuted(true);
                     }
-                  />
-                  <DropdownMenuContent
-                    align="end"
-                    className="min-w-[120px] border-white/10 bg-[#181818]"
-                  >
-                    {qualities.map((q) => (
-                      <DropdownMenuItem
-                        key={q}
-                        onClick={() => setQuality(q)}
-                        className={cn(
-                          activeQuality === q && "text-[#e50914]",
-                        )}
-                      >
-                        {QUALITY_LABELS[q] ?? q}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
+                  }}
+                >
+                  {muted || volume === 0 ? (
+                    <VolumeMuteMark className="size-4" />
+                  ) : (
+                    <VolumeMark className="size-4" />
+                  )}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={muted ? 0 : volume}
+                  aria-label="Volume"
+                  className="player-scrub hidden w-14 sm:block sm:w-16"
+                  style={
+                    {
+                      "--progress": `${(muted ? 0 : volume) * 100}%`,
+                    } as React.CSSProperties
+                  }
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    setVolume(next);
+                    setMuted(next === 0);
+                    if (videoRef.current) {
+                      videoRef.current.volume = next;
+                      videoRef.current.muted = next === 0;
+                    }
+                  }}
+                />
+              </div>
+            )}
 
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={isYoutube ? toggleFullscreen : toggleDirectFullscreen}
-                title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-                className="size-8 text-white/70 hover:bg-white/10 hover:text-white sm:size-9"
+            {showCaptions && (
+              <button
+                type="button"
+                className="player-ctrl"
+                data-active={captionsOn ? "true" : undefined}
+                onClick={toggleCaptions}
+                title="Subtitles"
               >
-                {isFullscreen ? (
-                  <Minimize className="size-4" />
-                ) : (
-                  <Maximize className="size-4" />
-                )}
-              </Button>
-            </div>
+                <CaptionsMark className="size-4" />
+              </button>
+            )}
+
+            {showQuality && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <button
+                      type="button"
+                      title="Quality"
+                      className="player-ctrl player-ctrl--label font-mono text-[10px] font-semibold tracking-[0.08em] text-white/70 hover:text-white"
+                    >
+                      {QUALITY_LABELS[activeQuality] ?? "Auto"}
+                    </button>
+                  }
+                />
+                <DropdownMenuContent
+                  align="end"
+                  className="min-w-[7rem] rounded-none border-white/10 bg-[#0c0c10] p-1"
+                >
+                  {qualities.map((q) => (
+                    <DropdownMenuItem
+                      key={q}
+                      onClick={() => setQuality(q)}
+                      className={cn(
+                        "rounded-none font-mono text-xs",
+                        activeQuality === q && "bg-white/[0.04] text-[#e50914]",
+                      )}
+                    >
+                      {QUALITY_LABELS[q] ?? q}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            <button
+              type="button"
+              className="player-ctrl"
+              onClick={isYoutube ? toggleFullscreen : toggleDirectFullscreen}
+              title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+            >
+              {isFullscreen ? (
+                <CollapseMark className="size-4" />
+              ) : (
+                <ExpandMark className="size-4" />
+              )}
+            </button>
           </div>
         </div>
       </div>
