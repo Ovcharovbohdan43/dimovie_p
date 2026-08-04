@@ -77,6 +77,7 @@ export interface RoomParticipant {
   userId: string;
   displayName: string;
   role: string;
+  avatarUrl?: string | null;
 }
 
 export interface RoomSummary {

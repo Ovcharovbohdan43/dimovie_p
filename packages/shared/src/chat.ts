@@ -17,6 +17,8 @@ export interface ChatMessagePayload {
   displayName: string;
   content: string;
   createdAt: string;
+  /** Client-rendered notices (join, pause, seek). Not persisted. */
+  kind?: "user" | "system";
 }
 
 export interface ChatDeletePayload {

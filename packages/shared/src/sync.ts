@@ -46,6 +46,7 @@ export const WS_ROOM_EVENTS = {
   CHAT_MESSAGE: "chat:message",
   CHAT_DELETE: "chat:delete",
   CHAT_COOLDOWN: "chat:cooldown",
+  CHAT_TYPING: "chat:typing",
   REACTION: "reaction:emit",
   VOICE_SIGNAL: "voice:signal",
   VOICE_JOIN: "voice:join",

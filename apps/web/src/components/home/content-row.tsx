@@ -53,17 +53,17 @@ export function ContentRow({ title, children, className }: ContentRowProps) {
         className,
       )}
     >
-      <div className="mb-3 flex items-end justify-between gap-4 md:mb-4">
-        <h2 className="font-display text-lg font-semibold tracking-[-0.02em] text-white md:text-xl">
+      <div className="mb-4 flex items-end justify-between gap-4 md:mb-6">
+        <h2 className="font-sans text-xl font-semibold tracking-[-0.03em] text-white md:text-2xl">
           {title}
         </h2>
-        <div className="hidden items-center gap-1 sm:flex">
+        <div className="hidden items-center gap-2 sm:flex">
           <button
             type="button"
             aria-label="Scroll left"
             disabled={!canLeft}
             onClick={() => scroll("left")}
-            className="grid size-9 place-items-center border border-white/12 bg-black/45 text-white transition enabled:hover:border-white/30 enabled:hover:bg-black/70 disabled:opacity-25"
+            className="dm-btn-neutral grid size-9 place-items-center rounded-xl disabled:opacity-25"
           >
             <RailArrow direction="left" className="size-4" />
           </button>
@@ -72,7 +72,7 @@ export function ContentRow({ title, children, className }: ContentRowProps) {
             aria-label="Scroll right"
             disabled={!canRight}
             onClick={() => scroll("right")}
-            className="grid size-9 place-items-center border border-white/12 bg-black/45 text-white transition enabled:hover:border-white/30 enabled:hover:bg-black/70 disabled:opacity-25"
+            className="dm-btn-neutral grid size-9 place-items-center rounded-xl disabled:opacity-25"
           >
             <RailArrow direction="right" className="size-4" />
           </button>
@@ -82,19 +82,19 @@ export function ContentRow({ title, children, className }: ContentRowProps) {
       <div className="relative">
         <div
           className={cn(
-            "pointer-events-none absolute inset-y-0 left-0 z-[1] w-8 bg-gradient-to-r from-[#08080c] to-transparent transition-opacity sm:w-12",
+            "pointer-events-none absolute inset-y-0 left-0 z-[1] w-8 bg-gradient-to-r from-[#050508] to-transparent transition-opacity sm:w-12",
             canLeft ? "opacity-100" : "opacity-0",
           )}
         />
         <div
           className={cn(
-            "pointer-events-none absolute inset-y-0 right-0 z-[1] w-8 bg-gradient-to-l from-[#08080c] to-transparent transition-opacity sm:w-12",
+            "pointer-events-none absolute inset-y-0 right-0 z-[1] w-8 bg-gradient-to-l from-[#050508] to-transparent transition-opacity sm:w-12",
             canRight ? "opacity-100" : "opacity-0",
           )}
         />
         <div
           ref={scrollRef}
-          className="scrollbar-hide flex snap-x snap-mandatory gap-2.5 overflow-x-auto pb-2 sm:gap-3 md:gap-3.5"
+          className="scrollbar-hide flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2"
         >
           {children}
         </div>

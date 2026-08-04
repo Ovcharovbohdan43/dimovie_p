@@ -22,12 +22,15 @@ interface ChatEmojiPickerProps {
   onInsert: (emoji: string) => void;
   onReaction: (emoji: string) => void;
   className?: string;
+  /** When true, only the smile trigger is shown (parent owns quick reactions). */
+  iconOnly?: boolean;
 }
 
 export function ChatEmojiPicker({
   onInsert,
   onReaction,
   className,
+  iconOnly = false,
 }: ChatEmojiPickerProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -75,34 +78,37 @@ export function ChatEmojiPicker({
         </div>
       )}
 
-      <div className="mb-2.5 flex items-center gap-1">
+      <div className={cn("flex items-center gap-1", !iconOnly && "mb-2.5")}>
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-label="Open emoji picker"
           className={cn(
-            "flex size-9 shrink-0 cursor-pointer select-none items-center justify-center rounded-lg transition",
+            "flex size-8 shrink-0 cursor-pointer select-none items-center justify-center rounded-xl transition",
             open
-              ? "bg-[#e50914]/20 text-[#e50914]"
+              ? "bg-white/15 text-white"
               : "bg-white/[0.04] text-white/60 hover:bg-white/10 hover:text-white",
           )}
         >
-          <Smile className="size-5" />
+          <Smile className="size-4" />
         </button>
 
-        <div className="mx-1 h-5 w-px bg-white/10" />
-
-        {QUICK_REACTIONS.map((emoji) => (
-          <button
-            key={emoji}
-            type="button"
-            onClick={() => onReaction(emoji)}
-            title="Send reaction"
-            className="flex size-9 shrink-0 cursor-pointer select-none items-center justify-center rounded-lg bg-white/[0.04] text-lg transition hover:bg-white/10 hover:scale-110 active:scale-95"
-          >
-            {emoji}
-          </button>
-        ))}
+        {!iconOnly && (
+          <>
+            <div className="mx-1 h-5 w-px bg-white/10" />
+            {QUICK_REACTIONS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => onReaction(emoji)}
+                title="Send reaction"
+                className="flex size-9 shrink-0 cursor-pointer select-none items-center justify-center rounded-xl bg-white/[0.04] text-lg transition hover:scale-110 hover:bg-white/10 active:scale-95"
+              >
+                {emoji}
+              </button>
+            ))}
+          </>
+        )}
       </div>
     </div>
   );

@@ -95,7 +95,9 @@ export class RoomPresenceService {
       where: { roomCode },
       include: {
         participants: {
-          include: { user: { select: { id: true, displayName: true } } },
+          include: {
+            user: { select: { id: true, displayName: true, avatarUrl: true } },
+          },
         },
       },
     });
@@ -105,6 +107,7 @@ export class RoomPresenceService {
         userId: p.user.id,
         displayName: p.user.displayName,
         role: p.role,
+        avatarUrl: p.user.avatarUrl,
       })) ?? []
     );
   }

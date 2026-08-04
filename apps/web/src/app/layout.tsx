@@ -8,13 +8,13 @@ import { MotionProvider } from "@/providers/motion-provider";
 const manrope = Manrope({
   variable: "--font-sans",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+  weight: ["400", "600"],
 });
 
 const syne = Syne({
   variable: "--font-display",
   subsets: ["latin"],
-  weight: ["500", "600", "700", "800"],
+  weight: ["600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -33,11 +33,11 @@ export default function RootLayout({
       lang="en"
       className={`${manrope.variable} ${syne.variable} dark h-full`}
     >
-      <body className="min-h-full bg-[#08080c] font-sans text-white antialiased">
+      <body className="dm-app min-h-full font-sans font-normal text-white antialiased">
         <QueryProvider>
           <MotionProvider>
             <Navbar />
-            <main>{children}</main>
+            <main className="relative">{children}</main>
           </MotionProvider>
         </QueryProvider>
       </body>

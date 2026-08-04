@@ -169,14 +169,14 @@ export function RoomParticipantsMenu({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[min(80vh,560px)] max-w-md overflow-hidden border-white/10 bg-[#181818] p-0 text-white sm:max-w-md">
+      <DialogContent className="dm-glass max-h-[min(80vh,560px)] max-w-md overflow-hidden rounded-[20px] border-white/10 p-0 text-white sm:max-w-md">
         <DialogHeader className="border-b border-white/[0.06] px-5 py-4">
-          <DialogTitle className="flex items-center gap-2 text-lg font-bold">
-            <Users className="size-5 text-[#e50914]" />
+          <DialogTitle className="flex items-center gap-2 text-lg font-semibold tracking-[-0.02em]">
+            <Users className="size-5 text-white/70" />
             Participants
           </DialogTitle>
           <DialogDescription className="text-white/50">
-            {participants.length}/{maxUsers} in room
+            {participants.length}/{maxUsers} in room · tap a name for profile
           </DialogDescription>
         </DialogHeader>
 
@@ -203,25 +203,34 @@ export function RoomParticipantsMenu({
                 return (
                   <li
                     key={participant.userId}
-                    className="flex items-center gap-3 rounded-lg px-2 py-2.5 hover:bg-white/[0.04]"
+                    className="flex items-center gap-3 rounded-2xl px-2 py-2.5 transition hover:bg-white/[0.05]"
                   >
-                    <Avatar size="sm" className="ring-1 ring-white/10">
-                      <AvatarFallback className="bg-white/10 text-xs text-white">
+                    <Avatar className="size-10 rounded-2xl ring-1 ring-white/10">
+                      <AvatarFallback className="rounded-2xl bg-white/10 text-xs font-semibold text-white">
                         {initials(participant.displayName)}
                       </AvatarFallback>
                     </Avatar>
 
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-white">
-                        {participant.displayName}
-                        {isSelf && (
+                      {isSelf ? (
+                        <a
+                          href="/profile"
+                          className="truncate text-sm font-semibold tracking-[-0.01em] text-white hover:underline"
+                        >
+                          {participant.displayName}
                           <span className="ml-1.5 text-xs font-normal text-white/40">
                             (you)
                           </span>
-                        )}
-                      </p>
+                        </a>
+                      ) : (
+                        <p className="truncate text-sm font-semibold tracking-[-0.01em] text-white">
+                          {participant.displayName}
+                        </p>
+                      )}
                       <p className="text-xs text-white/40">
                         {roleLabel(participant.role)}
+                        <span className="mx-1 text-white/20">·</span>
+                        Online
                       </p>
                     </div>
 

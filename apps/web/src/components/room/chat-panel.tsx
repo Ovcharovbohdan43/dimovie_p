@@ -6,12 +6,18 @@ import type { ChatMessagePayload } from "@dimovie/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ChatEmojiPicker } from "@/components/room/chat-emoji-picker";
 import { cn } from "@/lib/utils";
 
-interface ChatPanelProps {  messages: ChatMessagePayload[];
+const QUICK_REACTIONS = ["😂", "❤️", "😮", "🔥", "👏"] as const;
+
+interface ChatPanelProps {
+  messages: ChatMessagePayload[];
   onSend: (content: string) => void;
   onReaction: (emoji: string) => void;
+  onTyping?: () => void;
+  typingNames?: string[];
   currentUserId?: string;
   participantCount?: number;
   chatCooldown?: number;
@@ -27,10 +33,16 @@ function formatMessageTime(ts: string) {
   });
 }
 
+function initials(name: string) {
+  return name.slice(0, 2).toUpperCase();
+}
+
 export function ChatPanel({
   messages,
   onSend,
   onReaction,
+  onTyping,
+  typingNames = [],
   currentUserId,
   participantCount = 0,
   chatCooldown = 0,
@@ -40,10 +52,11 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const typingTimer = useRef<number | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, typingNames]);
 
   const sendMessage = () => {
     if (!input.trim() || chatCooldown > 0) return;
@@ -63,16 +76,23 @@ export function ChatPanel({
     }
   };
 
+  const handleChange = (value: string) => {
+    setInput(value);
+    if (!onTyping || !value.trim()) return;
+    if (typingTimer.current != null) return;
+    onTyping();
+    typingTimer.current = window.setTimeout(() => {
+      typingTimer.current = null;
+    }, 1600);
+  };
+
   const panel = (
-    <div
-      className={cn(
-        "flex h-full flex-col bg-[#141414]",
-        className,
-      )}
-    >
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3.5">
+    <div className={cn("dm-glass flex h-full flex-col rounded-none", className)}>
+      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-4">
         <div>
-          <h3 className="text-sm font-bold text-white">Live Chat</h3>
+          <h3 className="text-sm font-semibold tracking-[-0.01em] text-white">
+            Live Chat
+          </h3>
           <p className="text-[11px] text-white/40">
             {participantCount} in the party
           </p>
@@ -82,7 +102,7 @@ export function ChatPanel({
             variant="ghost"
             size="icon"
             onClick={onMobileClose}
-            className="size-8 text-white/50 hover:text-white lg:hidden"
+            className="size-8 text-white/50 hover:bg-white/10 hover:text-white lg:hidden"
           >
             <X className="size-4" />
           </Button>
@@ -101,56 +121,118 @@ export function ChatPanel({
             </div>
           ) : (
             messages.map((msg) => {
+              if (msg.kind === "system") {
+                return (
+                  <div
+                    key={msg.id}
+                    className="dm-msg-in px-2 py-1 text-center text-[11px] text-white/40"
+                  >
+                    {msg.content}
+                  </div>
+                );
+              }
+
               const isOwn = msg.userId === currentUserId;
               return (
                 <div
                   key={msg.id}
-                  className={cn("flex flex-col", isOwn && "items-end")}
+                  className={cn(
+                    "dm-msg-in flex gap-2.5",
+                    isOwn && "flex-row-reverse",
+                  )}
                 >
+                  <Avatar className="mt-0.5 size-8 shrink-0 rounded-xl">
+                    <AvatarFallback
+                      className={cn(
+                        "rounded-xl text-[10px] font-semibold",
+                        isOwn
+                          ? "bg-white/15 text-white"
+                          : "bg-[#5b9fd4]/20 text-[#9ec9ea]",
+                      )}
+                    >
+                      {initials(msg.displayName)}
+                    </AvatarFallback>
+                  </Avatar>
                   <div
                     className={cn(
-                      "max-w-[85%] rounded-2xl px-3 py-2",
-                      isOwn
-                        ? "rounded-br-sm bg-[#e50914]/20 ring-1 ring-[#e50914]/20"
-                        : "rounded-bl-sm bg-white/[0.06] ring-1 ring-white/[0.04]",
+                      "min-w-0 max-w-[78%]",
+                      isOwn && "items-end text-right",
                     )}
                   >
-                    {!isOwn && (
-                      <span className="text-[11px] font-semibold text-[#00a8e1]">
-                        {msg.displayName}
+                    <div
+                      className={cn(
+                        "mb-1 flex items-baseline gap-2",
+                        isOwn && "flex-row-reverse",
+                      )}
+                    >
+                      <span className="text-[12px] font-semibold tracking-[-0.01em] text-white">
+                        {isOwn ? "You" : msg.displayName}
                       </span>
-                    )}
-                    <p className="text-sm leading-snug text-white/90">
-                      {msg.content}
-                    </p>
+                      <span className="text-[10px] text-white/25">
+                        {formatMessageTime(msg.createdAt)}
+                      </span>
+                    </div>
+                    <div
+                      className={cn(
+                        "rounded-2xl px-3 py-2 text-left",
+                        isOwn
+                          ? "rounded-tr-md bg-white/[0.1] ring-1 ring-white/[0.08]"
+                          : "rounded-tl-md bg-white/[0.05] ring-1 ring-white/[0.04]",
+                      )}
+                    >
+                      <p className="text-sm leading-snug text-white/90">
+                        {msg.content}
+                      </p>
+                    </div>
                   </div>
-                  <span className="mt-1 px-1 text-[10px] text-white/25">
-                    {formatMessageTime(msg.createdAt)}
-                  </span>
                 </div>
               );
             })
+          )}
+
+          {typingNames.length > 0 && (
+            <p className="dm-msg-in px-2 text-[11px] text-white/40">
+              {typingNames.length === 1
+                ? `${typingNames[0]} is typing…`
+                : `${typingNames.slice(0, 2).join(", ")} are typing…`}
+            </p>
           )}
           <div ref={bottomRef} />
         </div>
       </ScrollArea>
 
-      <div className="shrink-0 border-t border-white/[0.06] bg-[#0b0b0f]/50 p-3">
-        <ChatEmojiPicker
-          onInsert={(emoji) => setInput((prev) => prev + emoji)}
-          onReaction={onReaction}
-        />
+      <div className="shrink-0 border-t border-white/[0.06] bg-black/20 p-3">
+        <div className="mb-2 flex items-center gap-1.5">
+          {QUICK_REACTIONS.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              onClick={() => onReaction(emoji)}
+              className="grid size-8 place-items-center rounded-xl text-base transition hover:bg-white/10"
+              aria-label={`React ${emoji}`}
+            >
+              {emoji}
+            </button>
+          ))}
+          <div className="ml-auto">
+            <ChatEmojiPicker
+              iconOnly
+              onInsert={(emoji) => setInput((prev) => prev + emoji)}
+              onReaction={onReaction}
+            />
+          </div>
+        </div>
         <form onSubmit={handleSubmit} className="relative">
           <Input
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => handleChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
               chatCooldown > 0
-                ? `Wait ${chatCooldown}s before sending...`
-                : "Send a message..."
+                ? `Wait ${chatCooldown}s…`
+                : "Send a message…"
             }
-            className="h-10 border-white/[0.08] bg-white/[0.04] pr-11 text-sm text-white placeholder:text-white/30 focus-visible:ring-[#e50914]/50"
+            className="h-11 rounded-2xl border-white/[0.08] bg-white/[0.04] pr-12 text-sm text-white placeholder:text-white/30 focus-visible:ring-white/25"
             maxLength={500}
             disabled={chatCooldown > 0}
           />
@@ -159,9 +241,9 @@ export function ChatPanel({
             disabled={!input.trim() || chatCooldown > 0}
             aria-label="Send message"
             className={cn(
-              "absolute right-1.5 top-1/2 flex size-7 -translate-y-1/2 cursor-pointer select-none items-center justify-center rounded-full transition",
+              "absolute right-1.5 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-xl transition",
               input.trim() && chatCooldown === 0
-                ? "bg-[#e50914] text-white hover:bg-[#f40612]"
+                ? "bg-white text-black hover:bg-white/90"
                 : "bg-white/10 text-white/30",
             )}
           >
@@ -185,7 +267,7 @@ export function ChatPanel({
           className="absolute inset-0 bg-black/70 backdrop-blur-sm"
           onClick={onMobileClose}
         />
-        <div className="absolute bottom-0 left-0 right-0 h-[75vh] overflow-hidden rounded-t-2xl border-t border-white/10 shadow-2xl">
+        <div className="absolute bottom-0 left-0 right-0 h-[78vh] overflow-hidden rounded-t-[20px] border-t border-white/10 shadow-2xl">
           {panel}
         </div>
       </div>

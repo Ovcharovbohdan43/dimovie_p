@@ -232,6 +232,15 @@ export class RealtimeGateway
     }
   }
 
+  @SubscribeMessage(WS_ROOM_EVENTS.CHAT_TYPING)
+  onChatTyping(@ConnectedSocket() client: AuthedSocket) {
+    if (!client.roomCode || !client.user) return;
+    client.to(`room:${client.roomCode}`).emit(WS_ROOM_EVENTS.CHAT_TYPING, {
+      userId: client.user.id,
+      displayName: client.user.displayName,
+    });
+  }
+
   @SubscribeMessage(WS_ROOM_EVENTS.CHAT_DELETE)
   async onChatDelete(
     @ConnectedSocket() client: AuthedSocket,
@@ -291,7 +300,9 @@ export class RealtimeGateway
       where: { roomCode },
       include: {
         participants: {
-          include: { user: { select: { id: true, displayName: true } } },
+          include: {
+            user: { select: { id: true, displayName: true, avatarUrl: true } },
+          },
         },
       },
     });
@@ -301,6 +312,7 @@ export class RealtimeGateway
         userId: p.user.id,
         displayName: p.user.displayName,
         role: p.role,
+        avatarUrl: p.user.avatarUrl,
       })) ?? []
     );
   }

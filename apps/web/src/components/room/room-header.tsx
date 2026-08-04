@@ -121,7 +121,7 @@ export function RoomHeader({
 
   return (
     <>
-      <header className="relative z-20 shrink-0 border-b border-white/[0.06] bg-[#08080c]/90 backdrop-blur-xl">
+      <header className="relative z-20 shrink-0 border-b border-white/[0.06] bg-[#050508]/80 backdrop-blur-xl">
         <div className="mx-auto flex h-12 max-w-[1920px] items-center gap-2 px-3 sm:h-12 sm:gap-3 sm:px-4 md:px-6">
           <button
             type="button"

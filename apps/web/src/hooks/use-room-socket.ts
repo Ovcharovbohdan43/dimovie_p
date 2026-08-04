@@ -38,6 +38,7 @@ interface UseRoomSocketOptions {
   onRoomClosed?: (payload: { message: string }) => void;
   onChatCooldown?: (waitSeconds: number) => void;
   onChatError?: (message: string) => void;
+  onTyping?: (data: { userId: string; displayName: string }) => void;
 }
 
 export function useRoomSocket({
@@ -53,6 +54,7 @@ export function useRoomSocket({
   onRoomClosed,
   onChatCooldown,
   onChatError,
+  onTyping,
 }: UseRoomSocketOptions) {
   const socketRef = useRef<Socket | null>(null);
   const roomJoinedRef = useRef(false);
@@ -71,6 +73,7 @@ export function useRoomSocket({
   const onRoomClosedRef = useRef(onRoomClosed);
   const onChatCooldownRef = useRef(onChatCooldown);
   const onChatErrorRef = useRef(onChatError);
+  const onTypingRef = useRef(onTyping);
 
   useEffect(() => {
     onSyncStateRef.current = onSyncState;
@@ -82,6 +85,7 @@ export function useRoomSocket({
     onRoomClosedRef.current = onRoomClosed;
     onChatCooldownRef.current = onChatCooldown;
     onChatErrorRef.current = onChatError;
+    onTypingRef.current = onTyping;
   });
 
   useEffect(() => {
@@ -181,6 +185,13 @@ export function useRoomSocket({
         onChatCooldownRef.current?.(payload.waitSeconds);
       });
 
+      socket.on(
+        WS_ROOM_EVENTS.CHAT_TYPING,
+        (payload: { userId: string; displayName: string }) => {
+          onTypingRef.current?.(payload);
+        },
+      );
+
       socket.on(WS_ROOM_EVENTS.PARTICIPANTS, (participants: Participant[]) => {
         onParticipantsRef.current?.(participants);
       });
@@ -270,12 +281,17 @@ export function useRoomSocket({
     socketRef.current?.emit(WS_ROOM_EVENTS.REACTION, { emoji });
   }, []);
 
+  const sendTyping = useCallback(() => {
+    socketRef.current?.emit(WS_ROOM_EVENTS.CHAT_TYPING);
+  }, []);
+
   return {
     connected: connected && roomJoined,
     reconnecting,
     sendSyncIntent,
     sendChat,
     sendReaction,
+    sendTyping,
     chatCooldown,
   };
 }

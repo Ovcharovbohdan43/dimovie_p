@@ -125,12 +125,7 @@ function DashboardContent() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden pb-20 pt-16">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(ellipse_at_20%_0%,rgba(229,9,20,0.16),transparent_50%),radial-gradient(ellipse_at_80%_10%,rgba(0,168,225,0.1),transparent_45%)]"
-      />
-
+    <div className="dm-app relative min-h-screen overflow-hidden pb-20 pt-16">
       <div className="relative mx-auto max-w-[1920px] px-4 sm:px-6 md:px-10 lg:px-14">
         <motion.div
           className="mb-10 flex flex-col gap-6 border-b border-white/[0.06] pb-8 pt-8 sm:mb-12 sm:flex-row sm:items-end sm:justify-between md:pt-10"
@@ -139,10 +134,10 @@ function DashboardContent() {
           transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
         >
           <div className="max-w-xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00a8e1]">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/40">
               Your stage
             </p>
-            <h1 className="mt-2 font-display text-[clamp(1.75rem,4vw,2.75rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-white">
+            <h1 className="mt-2 font-sans text-[clamp(1.85rem,4vw,2.85rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-white">
               Welcome back, {me.data?.displayName}
             </h1>
             <p className="mt-2 text-sm text-white/55 md:text-base">
@@ -159,13 +154,28 @@ function DashboardContent() {
                 </Button>
               }
             />
-            <DialogContent className="border-white/10 bg-[#121218]/95 backdrop-blur-xl">
+            <DialogContent className="dm-glass max-w-lg rounded-[20px] border-white/10">
               <DialogHeader>
-                <DialogTitle className="font-display text-xl tracking-[-0.02em]">
+                <DialogTitle className="font-sans text-xl font-semibold tracking-[-0.02em]">
                   Create watch party
                 </DialogTitle>
               </DialogHeader>
               <div className="space-y-4 pt-2">
+                <div
+                  className="rounded-2xl border border-dashed border-white/15 bg-white/[0.03] px-4 py-6 text-center"
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    // File upload wires in-room; party is created first.
+                  }}
+                >
+                  <p className="text-sm font-semibold text-white/85">
+                    Drop a video later in the room
+                  </p>
+                  <p className="mt-1 text-xs text-white/40">
+                    YouTube / Vimeo links, catalog picks, or local files after you start
+                  </p>
+                </div>
                 <div>
                   <Label>Privacy</Label>
                   <select
