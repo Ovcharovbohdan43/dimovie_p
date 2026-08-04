@@ -126,24 +126,43 @@ function isBotChallengeHtml(html: string): boolean {
   return (
     html.includes('anubis_challenge') ||
     html.includes('╨╜╨╡ ╨▒╨╛╤é') ||
-    html.length < 10000
+    (html.length < 8000 && !html.includes('user-favorites-holder'))
   );
 }
+
+function looksLikeCatalogHtml(html: string): boolean {
+  return (
+    html.includes('user-favorites-holder') || html.includes('b-post__title')
+  );
+}
+
+function isBrowserClosedError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /has been closed|Target page|browser has been closed|Browser closed|disconnected/i.test(
+    message,
+  );
+}
+
+type CatalogRequestContext = {
+  html: string;
+  origin: string;
+  postAjax: (
+    path: string,
+    form: Record<string, string>,
+    referer: string,
+  ) => Promise<unknown>;
+};
 
 @Injectable()
 export class RezkaCatalogService implements OnModuleDestroy {
   private readonly logger = new Logger(RezkaCatalogService.name);
   private browser: Browser | null = null;
   private browserInit: Promise<Browser> | null = null;
-  /** Serialize Playwright — concurrent Chromium contexts OOM small Railway boxes. */
+  /** Serialize heavy catalog work — concurrent Chromium contexts OOM small boxes. */
   private chain: Promise<unknown> = Promise.resolve();
 
   async onModuleDestroy() {
-    if (this.browser) {
-      await this.browser.close().catch(() => undefined);
-      this.browser = null;
-      this.browserInit = null;
-    }
+    await this.resetBrowser();
   }
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
@@ -155,8 +174,22 @@ export class RezkaCatalogService implements OnModuleDestroy {
     return run;
   }
 
+  private async resetBrowser(): Promise<void> {
+    const current = this.browser;
+    this.browser = null;
+    this.browserInit = null;
+    if (current) {
+      await current.close().catch(() => undefined);
+    }
+  }
+
   private launchArgs(): string[] {
-    const singleProcess = process.env.PLAYWRIGHT_SINGLE_PROCESS !== 'false';
+    // --single-process crashes Chromium on Railway under load; opt-in only.
+    const singleProcess = process.env.PLAYWRIGHT_SINGLE_PROCESS === 'true';
+    const heapMb = Number.parseInt(
+      process.env.PLAYWRIGHT_JS_HEAP_MB ?? '256',
+      10,
+    );
     return [
       '--disable-blink-features=AutomationControlled',
       '--no-sandbox',
@@ -166,7 +199,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
       '--disable-extensions',
       '--mute-audio',
       '--no-first-run',
-      '--js-flags=--max-old-space-size=192',
+      `--js-flags=--max-old-space-size=${Number.isFinite(heapMb) ? heapMb : 256}`,
       ...(singleProcess ? ['--single-process', '--no-zygote'] : []),
     ];
   }
@@ -207,63 +240,147 @@ export class RezkaCatalogService implements OnModuleDestroy {
     return this.browser;
   }
 
-  private async withCatalogContext<T>(
+  /** Prefer plain HTTP — avoids Chromium OOM on small Railway instances. */
+  private async fetchHtmlLight(
     catalogUrl: string,
-    fn: (ctx: {
-      html: string;
-      context: BrowserContext;
-      origin: string;
-    }) => Promise<T>,
-  ): Promise<T> {
-    return this.enqueue(async () => {
-      const origin = this.resolveOrigin(catalogUrl);
-      let browser: Browser;
-      try {
-        browser = await this.getBrowser();
-      } catch (err) {
-        if (err instanceof ServiceUnavailableException) throw err;
-        throw new ServiceUnavailableException(
-          'Catalog parsing is temporarily unavailable. Try again in a moment, or paste a YouTube / Vimeo link instead.',
+  ): Promise<{ html: string; cookieHeader: string } | null> {
+    try {
+      const response = await fetch(catalogUrl, {
+        headers: {
+          'User-Agent': USER_AGENT,
+          Accept:
+            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(25000),
+      });
+      if (!response.ok) {
+        this.logger.warn(
+          `Light catalog fetch HTTP ${response.status} for ${catalogUrl}`,
         );
+        return null;
       }
 
-      const context = await browser.newContext({
-        userAgent: USER_AGENT,
-        locale: 'ru-RU',
-        viewport: { width: 1280, height: 720 },
-      });
+      const html = await response.text();
+      if (isBotChallengeHtml(html) || !looksLikeCatalogHtml(html)) {
+        this.logger.log(
+          `Light catalog fetch needs browser fallback for ${catalogUrl}`,
+        );
+        return null;
+      }
 
+      const cookies =
+        typeof response.headers.getSetCookie === 'function'
+          ? response.headers.getSetCookie()
+          : [];
+      const cookieHeader = cookies
+        .map((c) => c.split(';')[0]?.trim())
+        .filter(Boolean)
+        .join('; ');
+
+      this.logger.log(`Light catalog fetch ok for ${catalogUrl}`);
+      return { html, cookieHeader };
+    } catch (err) {
+      this.logger.warn(
+        `Light catalog fetch failed: ${err instanceof Error ? err.message : err}`,
+      );
+      return null;
+    }
+  }
+
+  private async withPlaywrightContext<T>(
+    catalogUrl: string,
+    origin: string,
+    fn: (ctx: CatalogRequestContext) => Promise<T>,
+  ): Promise<T> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      let context: BrowserContext | null = null;
       try {
-        const page = await context.newPage();
-        await page.goto(catalogUrl, {
-          waitUntil: 'domcontentloaded',
-          timeout: 60000,
-        });
-
-        try {
-          await page.waitForSelector('#user-favorites-holder, .b-post__title', {
-            state: 'attached',
-            timeout: 45000,
-          });
-        } catch {
-          const html = await page.content();
-          if (isBotChallengeHtml(html)) {
-            throw new NotFoundException(
-              'Catalog site blocked automated access. Try again in a moment.',
-            );
-          }
-          throw new NotFoundException('Catalog page not recognized');
+        if (attempt > 1) {
+          this.logger.warn(
+            `Retrying Playwright catalog load (attempt ${attempt})`,
+          );
+          await this.resetBrowser();
         }
 
-        const html = await page.content();
-        return await fn({ html, context, origin });
+        const browser = await this.getBrowser();
+        context = await browser.newContext({
+          userAgent: USER_AGENT,
+          locale: 'ru-RU',
+          viewport: { width: 1024, height: 720 },
+        });
+
+        const page = await context.newPage();
+        try {
+          await page.goto(catalogUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: 45000,
+          });
+
+          try {
+            await page.waitForSelector(
+              '#user-favorites-holder, .b-post__title',
+              {
+                state: 'attached',
+                timeout: 30000,
+              },
+            );
+          } catch {
+            const html = await page.content();
+            if (isBotChallengeHtml(html)) {
+              throw new NotFoundException(
+                'Catalog site blocked automated access. Try again in a moment.',
+              );
+            }
+            throw new NotFoundException('Catalog page not recognized');
+          }
+
+          const html = await page.content();
+          const requestContext = context;
+          return await fn({
+            html,
+            origin,
+            postAjax: async (path, form, referer) => {
+              const response = await requestContext.request.post(
+                `${origin}${path}`,
+                {
+                  form,
+                  headers: {
+                    Referer: referer,
+                    'X-Requested-With': 'XMLHttpRequest',
+                  },
+                  timeout: 20000,
+                },
+              );
+              if (!response.ok()) {
+                throw new NotFoundException(
+                  'Stream not available for this selection',
+                );
+              }
+              return response.json();
+            },
+          });
+        } finally {
+          await page.close().catch(() => undefined);
+        }
       } catch (err) {
+        lastError = err;
         if (
           err instanceof NotFoundException ||
           err instanceof BadRequestException ||
           err instanceof ServiceUnavailableException
         ) {
           throw err;
+        }
+        if (isBrowserClosedError(err) && attempt < 2) {
+          this.logger.warn(
+            `Playwright crashed mid-request, will relaunch: ${err instanceof Error ? err.message : err}`,
+          );
+          await this.resetBrowser();
+          continue;
         }
         this.logger.error(
           `Catalog fetch failed for ${catalogUrl}: ${err instanceof Error ? err.message : err}`,
@@ -272,8 +389,71 @@ export class RezkaCatalogService implements OnModuleDestroy {
           'Could not load this catalog page right now. Check the link and try again in a moment.',
         );
       } finally {
-        await context.close().catch(() => undefined);
+        if (context) {
+          await context.close().catch(() => undefined);
+        }
       }
+    }
+
+    this.logger.error(
+      `Catalog fetch failed for ${catalogUrl}: ${lastError instanceof Error ? lastError.message : lastError}`,
+    );
+    throw new ServiceUnavailableException(
+      'Could not load this catalog page right now. Check the link and try again in a moment.',
+    );
+  }
+
+  private async withCatalogContext<T>(
+    catalogUrl: string,
+    fn: (ctx: CatalogRequestContext) => Promise<T>,
+  ): Promise<T> {
+    return this.enqueue(async () => {
+      const origin = this.resolveOrigin(catalogUrl);
+
+      const light = await this.fetchHtmlLight(catalogUrl);
+      if (light) {
+        try {
+          return await fn({
+            html: light.html,
+            origin,
+            postAjax: async (path, form, referer) => {
+              const response = await fetch(`${origin}${path}`, {
+                method: 'POST',
+                headers: {
+                  'User-Agent': USER_AGENT,
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                  Referer: referer,
+                  'X-Requested-With': 'XMLHttpRequest',
+                  ...(light.cookieHeader
+                    ? { Cookie: light.cookieHeader }
+                    : {}),
+                },
+                body: new URLSearchParams(form),
+                signal: AbortSignal.timeout(20000),
+              });
+              if (!response.ok) {
+                throw new NotFoundException(
+                  'Stream not available for this selection',
+                );
+              }
+              return response.json();
+            },
+          });
+        } catch (err) {
+          if (
+            err instanceof NotFoundException ||
+            err instanceof BadRequestException ||
+            err instanceof ServiceUnavailableException
+          ) {
+            throw err;
+          }
+          this.logger.warn(
+            `Light catalog path failed, falling back to Playwright: ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      }
+
+      return this.withPlaywrightContext(catalogUrl, origin, fn);
     });
   }
 
@@ -286,10 +466,27 @@ export class RezkaCatalogService implements OnModuleDestroy {
   }
 
   private normalizeUrl(url: string): string {
-    const parsed = new URL(url.trim());
-    if (!parsed.pathname.endsWith('.html')) {
-      throw new BadRequestException('Link must point to an .html page');
+    let parsed: URL;
+    try {
+      parsed = new URL(url.trim());
+    } catch {
+      throw new BadRequestException('Invalid catalog URL');
     }
+    if (!isRezkaHost(parsed.hostname)) {
+      throw new BadRequestException('This resource is not supported');
+    }
+
+    const path = parsed.pathname;
+    const isHtml = path.endsWith('.html');
+    const isTitlePath =
+      /^\/(films|series|cartoons|animation|shows)\//i.test(path);
+
+    if (!isHtml && !isTitlePath) {
+      throw new BadRequestException(
+        'Link must point to a catalog title or episode page',
+      );
+    }
+
     return parsed.toString();
   }
 
@@ -430,7 +627,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
   ): Promise<CatalogStreamResult> {
     const normalized = this.normalizeUrl(catalogUrl);
 
-    return this.withCatalogContext(normalized, async ({ html, context, origin }) => {
+    return this.withCatalogContext(normalized, async ({ html, origin, postAjax }) => {
       const info = this.parseCatalogHtml(normalized, origin, html);
 
       const payload: Record<string, string> = {
@@ -449,23 +646,11 @@ export class RezkaCatalogService implements OnModuleDestroy {
         payload.action = 'get_movie';
       }
 
-      const response = await context.request.post(
-        `${origin}/ajax/get_cdn_series/`,
-        {
-          form: payload,
-          headers: {
-            Referer: normalized,
-            'X-Requested-With': 'XMLHttpRequest',
-          },
-          timeout: 20000,
-        },
-      );
-
-      if (!response.ok()) {
-        throw new NotFoundException('Stream not available for this selection');
-      }
-
-      const data = (await response.json()) as { url?: string };
+      const data = (await postAjax(
+        '/ajax/get_cdn_series/',
+        payload,
+        normalized,
+      )) as { url?: string };
       const encoded = data?.url;
       if (!encoded) {
         throw new NotFoundException('Stream not available for this selection');
