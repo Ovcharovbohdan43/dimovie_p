@@ -16,7 +16,6 @@ RUN npm ci --workspace=web --workspace=@dimovie/shared --include-workspace-root
 COPY packages/shared ./packages/shared
 COPY apps/web ./apps/web
 
-# NEXT_PUBLIC_* must be present at build time (inlined by Next)
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_WS_URL
 ARG NEXT_PUBLIC_APP_NAME
@@ -39,15 +38,14 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-# Do NOT set HOSTNAME — Railway overwrites it with the container name.
-# Do NOT hardcode PORT — Railway injects it.
 
-COPY --from=builder /app/package.json /app/package-lock.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages/shared ./packages/shared
-COPY --from=builder /app/apps/web ./apps/web
+# Monorepo standalone layout: apps/web/server.js under the standalone root
+COPY --from=builder /app/apps/web/.next/standalone ./
+COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder /app/apps/web/public ./apps/web/public
 
 WORKDIR /app/apps/web
 
-# Railway proxies to whatever process.env.PORT the app binds
-CMD ["node", "scripts/start.mjs"]
+# HOSTNAME must be set in the process env at start — Docker/Railway set HOSTNAME
+# to the container id, which causes Next to bind unreachable and Railway returns 502.
+CMD ["sh", "-c", "export HOSTNAME=0.0.0.0; echo \"[web] starting standalone on 0.0.0.0:${PORT:-3000}\"; exec node server.js"]

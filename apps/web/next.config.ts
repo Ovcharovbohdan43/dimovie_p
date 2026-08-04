@@ -15,7 +15,8 @@ const apiUrl = resolveApiUrl();
 const monorepoRoot = path.join(__dirname, "../..");
 
 const nextConfig: NextConfig = {
-  // Monorepo root so Turbopack resolves hoisted workspace deps
+  output: "standalone",
+  // Monorepo root so Turbopack / file tracing resolve hoisted workspace deps
   turbopack: {
     root: monorepoRoot,
   },

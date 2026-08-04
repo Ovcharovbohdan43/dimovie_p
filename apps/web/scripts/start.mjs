@@ -1,31 +1,53 @@
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
+import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
-const nextRoot = path.dirname(require.resolve("next/package.json"));
-const nextBin = path.join(nextRoot, "dist/bin/next");
+const here = path.dirname(fileURLToPath(import.meta.url));
+const webRoot = path.resolve(here, "..");
 
 const port = process.env.PORT || "3000";
-// Never use process.env.HOSTNAME — Railway sets it to the container name,
-// and Next then binds to an unreachable address → edge 502.
 const host = "0.0.0.0";
 
-console.log(`[web] listening on http://${host}:${port}`);
-console.log(`[web] next bin: ${nextBin}`);
+const env = {
+  ...process.env,
+  HOSTNAME: host,
+  PORT: String(port),
+};
 
-const child = spawn(
-  process.execPath,
-  [nextBin, "start", "--hostname", host, "--port", String(port)],
-  {
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      // Prevent next from reading Railway's container HOSTNAME
-      HOSTNAME: host,
-    },
-  },
+// Docker standalone (WORKDIR = apps/web)
+const standaloneHere = path.join(webRoot, "server.js");
+// Local monorepo build
+const standaloneLocal = path.join(
+  webRoot,
+  ".next",
+  "standalone",
+  "apps",
+  "web",
+  "server.js",
 );
+
+const serverJs = fs.existsSync(standaloneHere)
+  ? standaloneHere
+  : fs.existsSync(standaloneLocal)
+    ? standaloneLocal
+    : null;
+
+if (!serverJs) {
+  console.error(
+    "[web] standalone server.js not found — run `npm run build` first",
+  );
+  process.exit(1);
+}
+
+console.log(`[web] listening on http://${host}:${port}`);
+console.log(`[web] server: ${serverJs}`);
+
+const child = spawn(process.execPath, [serverJs], {
+  stdio: "inherit",
+  env,
+  cwd: path.dirname(serverJs),
+});
 
 child.on("exit", (code, signal) => {
   if (signal) {
