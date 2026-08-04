@@ -297,10 +297,14 @@ export class RezkaCatalogService implements OnModuleDestroy {
   }
 
   private launchArgs(): string[] {
-    // --single-process crashes Chromium on Railway under load; opt-in only.
-    const singleProcess = process.env.PLAYWRIGHT_SINGLE_PROCESS === 'true';
+    // Never use --single-process / --no-zygote: Chromium dies mid-page on Railway.
+    if (process.env.PLAYWRIGHT_SINGLE_PROCESS === 'true') {
+      this.logger.warn(
+        'Ignoring PLAYWRIGHT_SINGLE_PROCESS=true (causes Chromium crashes)',
+      );
+    }
     const heapMb = Number.parseInt(
-      process.env.PLAYWRIGHT_JS_HEAP_MB ?? '256',
+      process.env.PLAYWRIGHT_JS_HEAP_MB ?? '192',
       10,
     );
     return [
@@ -312,8 +316,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
       '--disable-extensions',
       '--mute-audio',
       '--no-first-run',
-      `--js-flags=--max-old-space-size=${Number.isFinite(heapMb) ? heapMb : 256}`,
-      ...(singleProcess ? ['--single-process', '--no-zygote'] : []),
+      `--js-flags=--max-old-space-size=${Number.isFinite(heapMb) ? heapMb : 192}`,
     ];
   }
 
