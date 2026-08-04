@@ -96,6 +96,7 @@
   html {
     @apply font-sans scroll-smooth;
     caret-color: transparent;
+    color-scheme: dark;
   }
   body {
     @apply bg-background text-foreground antialiased;
@@ -121,6 +122,15 @@
 
   select {
     cursor: pointer;
+    color-scheme: dark;
+    background-color: #121218;
+    color: #ffffff;
+  }
+
+  select option,
+  select optgroup {
+    background-color: #121218;
+    color: #ffffff;
   }
 
   input[type="range"] {

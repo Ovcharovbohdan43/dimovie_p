@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LoadingScreen } from "@/components/ui/loading-spinner";
+import { formSelectClassName } from "@/lib/select-field";
 
 function DashboardContent() {
   const router = useRouter();
@@ -130,7 +131,7 @@ function DashboardContent() {
                     onChange={(e) =>
                       setPrivacy(e.target.value as typeof privacy)
                     }
-                    className="mt-1 w-full rounded-md border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm"
+                    className={formSelectClassName}
                   >
                     <option value="PUBLIC">Public</option>
                     <option value="PRIVATE">Private (link only)</option>
