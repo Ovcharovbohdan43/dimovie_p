@@ -26,7 +26,6 @@ import { RoomPasswordForm } from "@/components/room/room-password-form";
 import { RoomCatalogSetup } from "@/components/room/room-catalog-setup";
 import { HostCatalogControls } from "@/components/room/host-catalog-controls";
 import { RoomBrandingForm } from "@/components/room/room-branding-form";
-import { VoiceControls } from "@/components/room/voice-controls";
 import { VoiceDock } from "@/components/room/voice-dock";
 import { RoomMetaBar } from "@/components/room/room-meta-bar";
 import { useVoiceChat } from "@/hooks/use-voice-chat";
@@ -567,32 +566,10 @@ export default function RoomPage({
         <RoomHeader
           room={room.data}
           code={code}
-          connected={connected}
-          reconnecting={reconnecting}
-          hasJoined={hasJoined}
-          participantCount={participants.length || 1}
-          participants={participants}
           isOwner={!!isOwner}
-          currentUserId={me.data?.id}
           onBack={() => router.push("/dashboard")}
           onCloseRoom={isOwner ? handleCloseRoom : undefined}
           isClosingRoom={closeRoom.isPending}
-          voiceSlot={
-            hasJoined ? (
-              <VoiceControls
-                compact
-                connected={voice.connected}
-                muted={voice.muted}
-                peerCount={voice.voicePeers?.length ?? 0}
-                error={voice.error}
-                needsAudioUnlock={voice.needsAudioUnlock}
-                onJoin={voice.joinVoice}
-                onLeave={voice.leaveVoice}
-                onToggleMute={voice.toggleMute}
-                onUnlockAudio={voice.unlockRemoteAudio}
-              />
-            ) : null
-          }
         />
       )}
       <div className="flex min-h-0 flex-1">
@@ -657,6 +634,8 @@ export default function RoomPage({
                   showAnalytics={
                     !!isOwner && !!planFeatures?.roomAnalytics
                   }
+                  isOwner={!!isOwner}
+                  currentUserId={me.data?.id}
                 />
                 <div className="overflow-hidden rounded-[16px] shadow-[0_24px_80px_rgba(0,0,0,0.55)] ring-1 ring-white/[0.08] sm:rounded-[20px]">
                   <SyncVideoPlayer

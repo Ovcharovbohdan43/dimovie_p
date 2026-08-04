@@ -1,9 +1,16 @@
 "use client";
 
-import { Clock3, Users } from "lucide-react";
+import { useState } from "react";
+import { Check, Clock3, Copy, Users } from "lucide-react";
 import type { RoomParticipant, RoomSummary } from "@dimovie/shared";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarGroup,
+  AvatarGroupCount,
+} from "@/components/ui/avatar";
 import { RoomAnalyticsPanel } from "@/components/room/room-analytics-panel";
+import { RoomParticipantsMenu } from "@/components/room/room-participants-menu";
 import { cn } from "@/lib/utils";
 import { LiveDot } from "@/components/home/marks";
 
@@ -13,6 +20,8 @@ interface RoomMetaBarProps {
   participantCount: number;
   watchSeconds?: number;
   showAnalytics?: boolean;
+  isOwner?: boolean;
+  currentUserId?: string;
   className?: string;
 }
 
@@ -32,14 +41,46 @@ function initials(name: string) {
     .join("");
 }
 
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const input = document.createElement("textarea");
+    input.value = text;
+    input.setAttribute("readonly", "");
+    input.style.position = "fixed";
+    input.style.opacity = "0";
+    input.style.left = "-9999px";
+    document.body.appendChild(input);
+    input.select();
+    input.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(input);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export function RoomMetaBar({
   room,
   participants,
   participantCount,
   watchSeconds = 0,
   showAnalytics = false,
+  isOwner = false,
+  currentUserId,
   className,
 }: RoomMetaBarProps) {
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [participantsOpen, setParticipantsOpen] = useState(false);
+
   const meta = room.videoSource?.metadata as { title?: string } | undefined;
   const title =
     room.branding?.displayTitle ?? meta?.title ?? `Room ${room.roomCode}`;
@@ -50,6 +91,16 @@ export function RoomMetaBar({
       : room.privacy === "PASSWORD"
         ? "Locked"
         : "Private";
+
+  const handleCopyCode = async () => {
+    const ok = await copyText(room.roomCode);
+    if (!ok) return;
+    setCopiedCode(true);
+    window.setTimeout(() => setCopiedCode(false), 1600);
+  };
+
+  const visible = participants.slice(0, 4);
+  const overflow = participants.length - visible.length;
 
   return (
     <div className={cn("mb-3 sm:mb-4", className)}>
@@ -67,9 +118,20 @@ export function RoomMetaBar({
             <span className="text-white/25">·</span>
             <span>{privacy}</span>
             <span className="text-white/25">·</span>
-            <span className="font-mono tracking-widest text-white/55">
+            <button
+              type="button"
+              onClick={() => void handleCopyCode()}
+              title={copiedCode ? "Copied" : "Copy room code"}
+              aria-label={copiedCode ? "Room code copied" : "Copy room code"}
+              className="inline-flex items-center gap-1.5 font-mono tracking-widest text-white/55 transition hover:text-white"
+            >
               {room.roomCode}
-            </span>
+              {copiedCode ? (
+                <Check className="size-3.5 text-emerald-300" />
+              ) : (
+                <Copy className="size-3.5 opacity-70" />
+              )}
+            </button>
           </div>
 
           <h2 className="line-clamp-2 font-sans text-lg font-semibold tracking-[-0.03em] text-white sm:text-xl md:text-2xl">
@@ -122,26 +184,44 @@ export function RoomMetaBar({
         </div>
 
         {participants.length > 0 ? (
-          <div className="flex shrink-0 -space-x-2 pt-1">
-            {participants.slice(0, 4).map((p) => (
-              <Avatar
-                key={p.userId}
-                className="size-8 rounded-full ring-2 ring-[#050508] sm:size-9"
-                title={p.displayName}
-              >
-                <AvatarFallback className="bg-white/10 text-[10px] font-semibold text-white">
-                  {initials(p.displayName)}
-                </AvatarFallback>
-              </Avatar>
-            ))}
-            {participants.length > 4 ? (
-              <span className="grid size-8 place-items-center rounded-full bg-white/10 text-[10px] font-semibold text-white/70 ring-2 ring-[#050508] sm:size-9">
-                +{participants.length - 4}
-              </span>
-            ) : null}
-          </div>
+          <button
+            type="button"
+            onClick={() => setParticipantsOpen(true)}
+            aria-label="Open participants"
+            className="shrink-0 pt-1 transition hover:opacity-90"
+          >
+            <AvatarGroup className="-space-x-3 *:data-[slot=avatar]:ring-[#050508]">
+              {visible.map((p, index) => (
+                <Avatar
+                  key={p.userId}
+                  className="size-8 rounded-full sm:size-9"
+                  style={{ zIndex: visible.length - index }}
+                  title={p.displayName}
+                >
+                  <AvatarFallback className="bg-white/10 text-[10px] font-semibold text-white">
+                    {initials(p.displayName)}
+                  </AvatarFallback>
+                </Avatar>
+              ))}
+              {overflow > 0 ? (
+                <AvatarGroupCount className="size-8 bg-white/10 text-[10px] font-semibold text-white/70 ring-[#050508] sm:size-9">
+                  +{overflow}
+                </AvatarGroupCount>
+              ) : null}
+            </AvatarGroup>
+          </button>
         ) : null}
       </div>
+
+      <RoomParticipantsMenu
+        open={participantsOpen}
+        onOpenChange={setParticipantsOpen}
+        roomId={room.id}
+        participants={participants}
+        maxUsers={room.maxUsers}
+        isOwner={isOwner}
+        currentUserId={currentUserId}
+      />
     </div>
   );
 }

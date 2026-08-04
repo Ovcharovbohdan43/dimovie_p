@@ -158,27 +158,12 @@ export function ChatPanel({
                       {initials(msg.displayName)}
                     </AvatarFallback>
                   </Avatar>
-                  <div
-                    className={cn(
-                      "min-w-0 max-w-[78%]",
-                      isOwn && "items-end text-right",
+                  <div className="min-w-0 max-w-[78%]">
+                    {!isOwn && (
+                      <p className="mb-1 truncate text-[12px] font-semibold tracking-[-0.01em] text-white">
+                        {msg.displayName}
+                      </p>
                     )}
-                  >
-                    <div
-                      className={cn(
-                        "mb-1 flex items-baseline gap-2",
-                        isOwn && "flex-row-reverse",
-                      )}
-                    >
-                      {!isOwn && (
-                        <span className="text-[12px] font-semibold tracking-[-0.01em] text-white">
-                          {msg.displayName}
-                        </span>
-                      )}
-                      <span className="text-[10px] text-white/25">
-                        {formatMessageTime(msg.createdAt)}
-                      </span>
-                    </div>
                     <div
                       className={cn(
                         "rounded-2xl px-3 py-2 text-left",
@@ -189,6 +174,14 @@ export function ChatPanel({
                     >
                       <p className="text-sm leading-snug text-white/90">
                         {msg.content}
+                      </p>
+                      <p
+                        className={cn(
+                          "mt-1.5 text-[10px] tabular-nums text-white/35",
+                          isOwn && "text-right",
+                        )}
+                      >
+                        {formatMessageTime(msg.createdAt)}
                       </p>
                     </div>
                   </div>
