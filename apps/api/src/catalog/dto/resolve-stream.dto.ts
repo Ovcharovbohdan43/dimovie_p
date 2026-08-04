@@ -1,4 +1,4 @@
-import { IsString, MinLength, IsOptional } from 'class-validator';
+import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class ResolveStreamDto {
   @IsString()
@@ -15,4 +15,17 @@ export class ResolveStreamDto {
   @IsOptional()
   @IsString()
   episode?: string;
+
+  /** From /rezka/parse — avoids a second Chromium page load. */
+  @IsOptional()
+  @IsString()
+  postId?: string;
+
+  @IsOptional()
+  @IsIn(['movie', 'series'])
+  kind?: 'movie' | 'series';
+
+  @IsOptional()
+  @IsString()
+  title?: string;
 }

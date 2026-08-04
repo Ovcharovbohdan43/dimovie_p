@@ -40,6 +40,11 @@ export class CatalogController {
       dto.translationId,
       dto.season,
       dto.episode,
+      {
+        postId: dto.postId,
+        kind: dto.kind,
+        title: dto.title,
+      },
     );
   }
 

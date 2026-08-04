@@ -45,6 +45,10 @@ export interface CatalogStreamRequest {
   translationId: string;
   season?: string;
   episode?: string;
+  /** From parse — lets stream skip a second full page scrape. */
+  postId?: string;
+  kind?: "movie" | "series";
+  title?: string;
 }
 
 export interface CatalogStreamResult {

@@ -146,12 +146,24 @@ function isBrowserClosedError(err: unknown): boolean {
 type CatalogRequestContext = {
   html: string;
   origin: string;
+  cookieHeader: string;
   postAjax: (
     path: string,
     form: Record<string, string>,
     referer: string,
   ) => Promise<unknown>;
 };
+
+type CatalogSession = {
+  origin: string;
+  postId: string;
+  kind: 'movie' | 'series';
+  title: string;
+  cookieHeader: string;
+  expiresAt: number;
+};
+
+const SESSION_TTL_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class RezkaCatalogService implements OnModuleDestroy {
@@ -160,6 +172,8 @@ export class RezkaCatalogService implements OnModuleDestroy {
   private browserInit: Promise<Browser> | null = null;
   /** Serialize heavy catalog work — concurrent Chromium contexts OOM small boxes. */
   private chain: Promise<unknown> = Promise.resolve();
+  /** Cookies + postId from a recent parse so stream can skip Chromium. */
+  private readonly sessions = new Map<string, CatalogSession>();
 
   async onModuleDestroy() {
     await this.resetBrowser();
@@ -172,6 +186,105 @@ export class RezkaCatalogService implements OnModuleDestroy {
       () => undefined,
     );
     return run;
+  }
+
+  private rememberSession(
+    catalogUrl: string,
+    session: Omit<CatalogSession, 'expiresAt'>,
+  ): void {
+    this.sessions.set(catalogUrl, {
+      ...session,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+    });
+  }
+
+  private getSession(catalogUrl: string): CatalogSession | null {
+    const cached = this.sessions.get(catalogUrl);
+    if (!cached) return null;
+    if (cached.expiresAt < Date.now()) {
+      this.sessions.delete(catalogUrl);
+      return null;
+    }
+    return cached;
+  }
+
+  private cookieHeaderFromSetCookie(setCookies: string[]): string {
+    return setCookies
+      .map((c) => c.split(';')[0]?.trim())
+      .filter(Boolean)
+      .join('; ');
+  }
+
+  private async postAjaxFetch(
+    origin: string,
+    path: string,
+    form: Record<string, string>,
+    referer: string,
+    cookieHeader: string,
+  ): Promise<unknown> {
+    const response = await fetch(`${origin}${path}`, {
+      method: 'POST',
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Referer: referer,
+        'X-Requested-With': 'XMLHttpRequest',
+        Accept: 'application/json, text/javascript, */*; q=0.01',
+        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+      },
+      body: new URLSearchParams(form),
+      signal: AbortSignal.timeout(25000),
+    });
+    if (!response.ok) {
+      throw new NotFoundException('Stream not available for this selection');
+    }
+    return response.json();
+  }
+
+  private buildStreamPayload(
+    postId: string,
+    translationId: string,
+    kind: 'movie' | 'series',
+    season?: string,
+    episode?: string,
+  ): Record<string, string> {
+    const payload: Record<string, string> = {
+      id: postId,
+      translator_id: translationId,
+    };
+    if (kind === 'series') {
+      if (!season || !episode) {
+        throw new BadRequestException('Season and episode required for series');
+      }
+      payload.season = season;
+      payload.episode = episode;
+      payload.action = 'get_stream';
+    } else {
+      payload.action = 'get_movie';
+    }
+    return payload;
+  }
+
+  private toStreamResult(
+    encoded: string,
+    origin: string,
+    title: string,
+    translationId: string,
+    season?: string,
+    episode?: string,
+  ): CatalogStreamResult {
+    const qualities = parseQualities(encoded);
+    const best = pickBestQuality(qualities);
+    const proxiedUrl = `/backend/catalog/proxy?url=${encodeURIComponent(best.url)}&origin=${encodeURIComponent(origin)}`;
+    return {
+      streamUrl: proxiedUrl,
+      quality: best.quality,
+      qualities,
+      title,
+      season,
+      episode,
+      translationId,
+    };
   }
 
   private async resetBrowser(): Promise<void> {
@@ -262,6 +375,11 @@ export class RezkaCatalogService implements OnModuleDestroy {
         return null;
       }
 
+      const cookies =
+        typeof response.headers.getSetCookie === 'function'
+          ? response.headers.getSetCookie()
+          : [];
+      const cookieHeader = this.cookieHeaderFromSetCookie(cookies);
       const html = await response.text();
       if (isBotChallengeHtml(html) || !looksLikeCatalogHtml(html)) {
         this.logger.log(
@@ -270,15 +388,6 @@ export class RezkaCatalogService implements OnModuleDestroy {
         return null;
       }
 
-      const cookies =
-        typeof response.headers.getSetCookie === 'function'
-          ? response.headers.getSetCookie()
-          : [];
-      const cookieHeader = cookies
-        .map((c) => c.split(';')[0]?.trim())
-        .filter(Boolean)
-        .join('; ');
-
       this.logger.log(`Light catalog fetch ok for ${catalogUrl}`);
       return { html, cookieHeader };
     } catch (err) {
@@ -286,6 +395,29 @@ export class RezkaCatalogService implements OnModuleDestroy {
         `Light catalog fetch failed: ${err instanceof Error ? err.message : err}`,
       );
       return null;
+    }
+  }
+
+  /** Warm cookies even when the HTML is a bot challenge (ajax may still work). */
+  private async fetchCookiesLight(catalogUrl: string): Promise<string> {
+    try {
+      const response = await fetch(catalogUrl, {
+        headers: {
+          'User-Agent': USER_AGENT,
+          Accept:
+            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(20000),
+      });
+      const cookies =
+        typeof response.headers.getSetCookie === 'function'
+          ? response.headers.getSetCookie()
+          : [];
+      return this.cookieHeaderFromSetCookie(cookies);
+    } catch {
+      return '';
     }
   }
 
@@ -339,10 +471,15 @@ export class RezkaCatalogService implements OnModuleDestroy {
           }
 
           const html = await page.content();
+          const cookies = await context.cookies();
+          const cookieHeader = cookies
+            .map((c) => `${c.name}=${c.value}`)
+            .join('; ');
           const requestContext = context;
           return await fn({
             html,
             origin,
+            cookieHeader,
             postAjax: async (path, form, referer) => {
               const response = await requestContext.request.post(
                 `${origin}${path}`,
@@ -416,28 +553,15 @@ export class RezkaCatalogService implements OnModuleDestroy {
           return await fn({
             html: light.html,
             origin,
-            postAjax: async (path, form, referer) => {
-              const response = await fetch(`${origin}${path}`, {
-                method: 'POST',
-                headers: {
-                  'User-Agent': USER_AGENT,
-                  'Content-Type': 'application/x-www-form-urlencoded',
-                  Referer: referer,
-                  'X-Requested-With': 'XMLHttpRequest',
-                  ...(light.cookieHeader
-                    ? { Cookie: light.cookieHeader }
-                    : {}),
-                },
-                body: new URLSearchParams(form),
-                signal: AbortSignal.timeout(20000),
-              });
-              if (!response.ok) {
-                throw new NotFoundException(
-                  'Stream not available for this selection',
-                );
-              }
-              return response.json();
-            },
+            cookieHeader: light.cookieHeader,
+            postAjax: (path, form, referer) =>
+              this.postAjaxFetch(
+                origin,
+                path,
+                form,
+                referer,
+                light.cookieHeader,
+              ),
           });
         } catch (err) {
           if (
@@ -493,9 +617,23 @@ export class RezkaCatalogService implements OnModuleDestroy {
   async parseCatalog(url: string): Promise<CatalogInfo> {
     const catalogUrl = this.normalizeUrl(url);
     this.logger.log(`parseCatalog start: ${catalogUrl}`);
-    return this.withCatalogContext(catalogUrl, ({ html, origin }) =>
-      Promise.resolve(this.parseCatalogHtml(catalogUrl, origin, html)),
+    const info = await this.withCatalogContext(
+      catalogUrl,
+      ({ html, origin, cookieHeader }) => {
+        const parsed = this.parseCatalogHtml(catalogUrl, origin, html);
+        this.rememberSession(catalogUrl, {
+          origin,
+          postId: parsed.postId,
+          kind: parsed.kind,
+          title: parsed.title,
+          cookieHeader,
+        });
+        return Promise.resolve(parsed);
+      },
     );
+    // Free Chromium RAM so the following stream resolve can stay on fetch/ajax.
+    void this.resetBrowser();
+    return info;
   }
 
   private parseCatalogHtml(
@@ -624,53 +762,165 @@ export class RezkaCatalogService implements OnModuleDestroy {
     translationId: string,
     season?: string,
     episode?: string,
+    hints?: {
+      postId?: string;
+      kind?: 'movie' | 'series';
+      title?: string;
+    },
   ): Promise<CatalogStreamResult> {
     const normalized = this.normalizeUrl(catalogUrl);
+    const origin = this.resolveOrigin(normalized);
+    const cached = this.getSession(normalized);
 
-    return this.withCatalogContext(normalized, async ({ html, origin, postAjax }) => {
-      const info = this.parseCatalogHtml(normalized, origin, html);
+    const postId = hints?.postId?.trim() || cached?.postId;
+    const kind = hints?.kind || cached?.kind;
+    const title = hints?.title?.trim() || cached?.title || 'Watch Party';
 
-      const payload: Record<string, string> = {
-        id: info.postId,
-        translator_id: translationId,
-      };
+    // Fast path: client already parsed — only hit get_cdn_series (no Chromium).
+    if (postId && kind) {
+      this.logger.log(
+        `resolveStream ajax-only postId=${postId} kind=${kind} tr=${translationId}`,
+      );
+      return this.enqueue(async () => {
+        const payload = this.buildStreamPayload(
+          postId,
+          translationId,
+          kind,
+          season,
+          episode,
+        );
 
-      if (info.kind === 'series') {
-        if (!season || !episode) {
-          throw new BadRequestException('Season and episode required for series');
+        let cookieHeader = cached?.cookieHeader ?? '';
+        if (!cookieHeader) {
+          cookieHeader = await this.fetchCookiesLight(normalized);
         }
-        payload.season = season;
-        payload.episode = episode;
-        payload.action = 'get_stream';
-      } else {
-        payload.action = 'get_movie';
-      }
 
-      const data = (await postAjax(
-        '/ajax/get_cdn_series/',
-        payload,
-        normalized,
-      )) as { url?: string };
-      const encoded = data?.url;
-      if (!encoded) {
-        throw new NotFoundException('Stream not available for this selection');
-      }
+        const tryAjax = async (cookies: string) => {
+          const data = (await this.postAjaxFetch(
+            origin,
+            '/ajax/get_cdn_series/',
+            payload,
+            normalized,
+            cookies,
+          )) as { url?: string; success?: boolean };
+          const encoded = data?.url;
+          if (!encoded) {
+            throw new NotFoundException(
+              'Stream not available for this selection',
+            );
+          }
+          this.rememberSession(normalized, {
+            origin,
+            postId,
+            kind,
+            title,
+            cookieHeader: cookies,
+          });
+          this.logger.log(`resolveStream ok quality via ajax-only`);
+          return this.toStreamResult(
+            encoded,
+            origin,
+            title,
+            translationId,
+            season,
+            episode,
+          );
+        };
 
-      const qualities = parseQualities(encoded);
-      const best = pickBestQuality(qualities);
+        try {
+          return await tryAjax(cookieHeader);
+        } catch (err) {
+          if (
+            err instanceof BadRequestException ||
+            err instanceof ServiceUnavailableException
+          ) {
+            throw err;
+          }
+          this.logger.warn(
+            `Ajax-only stream failed, warming via Playwright: ${err instanceof Error ? err.message : err}`,
+          );
+        }
 
-      const proxiedUrl = `/backend/catalog/proxy?url=${encodeURIComponent(best.url)}&origin=${encodeURIComponent(origin)}`;
+        // Last resort: open page once for cookies + ajax (still no re-parse needed).
+        return this.withPlaywrightContext(
+          normalized,
+          origin,
+          async ({ cookieHeader: pwCookies, postAjax }) => {
+            const data = (await postAjax(
+              '/ajax/get_cdn_series/',
+              payload,
+              normalized,
+            )) as { url?: string };
+            const encoded = data?.url;
+            if (!encoded) {
+              throw new NotFoundException(
+                'Stream not available for this selection',
+              );
+            }
+            this.rememberSession(normalized, {
+              origin,
+              postId,
+              kind,
+              title,
+              cookieHeader: pwCookies,
+            });
+            void this.resetBrowser();
+            this.logger.log(`resolveStream ok via Playwright ajax`);
+            return this.toStreamResult(
+              encoded,
+              origin,
+              title,
+              translationId,
+              season,
+              episode,
+            );
+          },
+        );
+      });
+    }
 
-      return {
-        streamUrl: proxiedUrl,
-        quality: best.quality,
-        qualities,
-        title: info.title,
-        season,
-        episode,
-        translationId,
-      };
-    });
+    this.logger.log(`resolveStream full-page fallback (no postId)`);
+    return this.withCatalogContext(
+      normalized,
+      async ({ html, origin: pageOrigin, cookieHeader, postAjax }) => {
+        const info = this.parseCatalogHtml(normalized, pageOrigin, html);
+        this.rememberSession(normalized, {
+          origin: pageOrigin,
+          postId: info.postId,
+          kind: info.kind,
+          title: info.title,
+          cookieHeader,
+        });
+
+        const payload = this.buildStreamPayload(
+          info.postId,
+          translationId,
+          info.kind,
+          season,
+          episode,
+        );
+
+        const data = (await postAjax(
+          '/ajax/get_cdn_series/',
+          payload,
+          normalized,
+        )) as { url?: string };
+        const encoded = data?.url;
+        if (!encoded) {
+          throw new NotFoundException('Stream not available for this selection');
+        }
+
+        void this.resetBrowser();
+        return this.toStreamResult(
+          encoded,
+          pageOrigin,
+          info.title,
+          translationId,
+          season,
+          episode,
+        );
+      },
+    );
   }
 
   async proxyStream(

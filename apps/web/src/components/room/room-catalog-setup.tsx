@@ -72,6 +72,9 @@ export function RoomCatalogSetup({ roomId, onSuccess }: RoomCatalogSetupProps) {
         body: JSON.stringify({
           catalogUrl: catalog.catalogUrl,
           translationId,
+          postId: catalog.postId,
+          kind: catalog.kind,
+          title: catalog.title,
           ...(catalog.kind === "series"
             ? { season: seasonId, episode: episodeId }
             : {}),
