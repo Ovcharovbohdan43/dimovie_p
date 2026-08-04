@@ -99,7 +99,11 @@ const EXACT: Record<string, string> = {
 
 const PATTERNS: Array<[RegExp, string]> = [
   [
-    /failed to fetch|networkerror|load failed|fetch failed|econnrefused|enotfound|etimedout|network request failed/i,
+    /socket hang up|econnreset|failed to proxy/i,
+    "Loading this title took too long. Wait a moment and try again — first load can be slow.",
+  ],
+  [
+    /failed to fetch|networkerror|load failed|fetch failed|econnrefused|enotfound|etimedout|network request failed|aborted/i,
     "Can’t reach DiMovie right now. Check your connection and try again.",
   ],
   [

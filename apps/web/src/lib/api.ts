@@ -12,9 +12,14 @@ const SERVER_API_URL = normalizeApiUrl(
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000",
 );
 
-/** Browser uses same-origin proxy; server/WS use direct URL */
-export function getApiUrl(): string {
+/**
+ * Browser normally uses same-origin `/backend` rewrite.
+ * Long catalog (Playwright) calls go direct to the API — Next's proxy
+ * resets with ECONNRESET while Chromium is still working.
+ */
+export function getApiUrl(mode: "proxy" | "direct" = "proxy"): string {
   if (typeof window !== "undefined") {
+    if (mode === "direct") return SERVER_API_URL;
     return "/backend";
   }
   return SERVER_API_URL;
@@ -45,19 +50,25 @@ export function clearToken() {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+type FetchApiOptions = RequestInit & {
+  /** Hit Railway API directly (skip Next rewrite). Use for Rezka parse/stream. */
+  direct?: boolean;
+};
+
 async function fetchApi(
   path: string,
-  options: RequestInit = {},
+  options: FetchApiOptions = {},
 ): Promise<Response> {
-  const url = `${getApiUrl()}${path}`;
-  const method = (options.method ?? "GET").toUpperCase();
+  const { direct, ...init } = options;
+  const url = `${getApiUrl(direct ? "direct" : "proxy")}${path}`;
+  const method = (init.method ?? "GET").toUpperCase();
   const maxAttempts = method === "GET" ? 3 : 1;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     let res: Response;
     try {
       res = await fetch(url, {
-        ...options,
+        ...init,
         credentials: "include",
       });
     } catch (err) {
@@ -100,7 +111,7 @@ function throwApiError(res: Response, body: { message?: string | string[] }): ne
 
 export async function api<T>(
   path: string,
-  options: RequestInit = {},
+  options: FetchApiOptions = {},
 ): Promise<T> {
   const token = getToken();
   const headers: HeadersInit = {
@@ -125,7 +136,7 @@ export async function api<T>(
 
 export async function publicApi<T>(
   path: string,
-  options: RequestInit = {},
+  options: FetchApiOptions = {},
 ): Promise<T> {
   const res = await fetchApi(path, {
     ...options,

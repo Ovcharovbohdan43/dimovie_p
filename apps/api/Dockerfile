@@ -40,6 +40,8 @@ ENV PORT=4000
 ENV VOICE_SFU_ENABLED=false
 # Stable browser path used by both install and runtime (Railway)
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# Keep Chromium lean on Railway memory limits
+ENV PLAYWRIGHT_SINGLE_PROCESS=true
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \

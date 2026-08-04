@@ -31,6 +31,7 @@ export function HostCatalogControls({ room, onUpdated }: HostCatalogControlsProp
     mutationFn: () =>
       api<CatalogInfo>("/catalog/rezka/parse", {
         method: "POST",
+        direct: true,
         body: JSON.stringify({ url: catalogUrl }),
       }),
     onSuccess: (data) => {
@@ -62,6 +63,7 @@ export function HostCatalogControls({ room, onUpdated }: HostCatalogControlsProp
 
       const stream = await api<CatalogStreamResult>("/catalog/rezka/stream", {
         method: "POST",
+        direct: true,
         body: JSON.stringify({
           catalogUrl: catalog.catalogUrl,
           translationId,

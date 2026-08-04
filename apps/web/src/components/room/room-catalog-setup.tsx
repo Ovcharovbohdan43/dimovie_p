@@ -31,6 +31,7 @@ export function RoomCatalogSetup({ roomId, onSuccess }: RoomCatalogSetupProps) {
     mutationFn: (catalogUrl: string) =>
       api<CatalogInfo>("/catalog/rezka/parse", {
         method: "POST",
+        direct: true,
         body: JSON.stringify({ url: catalogUrl }),
       }),
     onSuccess: (data) => {
@@ -69,6 +70,7 @@ export function RoomCatalogSetup({ roomId, onSuccess }: RoomCatalogSetupProps) {
 
       const stream = await api<CatalogStreamResult>("/catalog/rezka/stream", {
         method: "POST",
+        direct: true,
         body: JSON.stringify({
           catalogUrl: catalog.catalogUrl,
           translationId,

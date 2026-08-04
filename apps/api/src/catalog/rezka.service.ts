@@ -1,232 +1,233 @@
 import {
   Injectable,
-  BadRequestException,
+  Logger,
   NotFoundException,
   OnModuleDestroy,
+  ServiceUnavailableException,
 } from '@nestjs/common';
-import type { Request, Response } from 'express';
-import { Readable } from 'stream';
-import { chromium, type Browser, type BrowserContext } from 'playwright';
+import { ConfigService } from '@nestjs/config';
 import { parse as parseHtml } from 'node-html-parser';
-import type {
-  CatalogEpisode,
-  CatalogInfo,
-  CatalogSeason,
-  CatalogStreamResult,
-  CatalogTranslation,
-} from '@dimovie/shared';
+import type { Browser, Page } from 'playwright';
+import { chromium } from 'playwright';
 import {
-  isRezkaHost,
   normalizeCatalogInfo,
-  parseEpisodeFromRezkaUrl,
+  type CatalogEpisode,
+  type CatalogInfo,
+  type CatalogSeason,
+  type CatalogStreamResult,
+  type CatalogTranslation,
 } from '@dimovie/shared';
+import { parseEpisodeFromRezkaUrl } from './catalog.util';
 
-const TRASH = ['@', '#', '!', '^', '$'];
-const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
-function product(iterables: string[], repeat: number): string[][] {
-  const copies: string[][] = [];
-  for (let i = 0; i < repeat; i++) {
-    copies.push([...iterables]);
-  }
-  return copies.reduce<string[][]>((acc, value) => {
-    const tmp: string[][] = [];
-    acc.forEach((a0) => {
-      value.forEach((a1) => {
-        tmp.push(a0.concat(a1));
-      });
-    });
-    return tmp;
-  }, [[]]);
-}
-
-function decodeStreamPayload(data: string): string {
-  let decoded = data.replace('#h', '').split('//_//').join('');
-  for (let i = 2; i < 4; i++) {
-    const combos = product(TRASH, i);
-    for (const combo of combos) {
-      const encoded = Buffer.from(combo.join(''), 'utf8').toString('base64');
-      if (decoded.includes(encoded)) {
-        decoded = decoded.replaceAll(encoded, '');
-      }
-    }
-  }
-  decoded += '==';
-  return Buffer.from(decoded, 'base64').toString('utf8');
-}
-
-function normalizeQualityLabel(label: string): string {
-  const cleaned = label.replace(/<[^>]+>/g, '').trim();
-  if (/1080/i.test(cleaned)) return '1080p';
-  if (/720/i.test(cleaned)) return '720p';
-  if (/480/i.test(cleaned)) return '480p';
-  if (/360/i.test(cleaned)) return '360p';
-  if (/240/i.test(cleaned)) return '240p';
-  return cleaned;
-}
-
-function parseStreamUrlField(raw: string): Record<string, string> {
-  let text = raw.trim();
-  if (!text.includes('http')) {
-    text = decodeStreamPayload(text);
-  }
-
-  const urls: Record<string, string> = {};
-  const parts = text.split(/,(?=\[)/);
-
-  for (const part of parts) {
-    const match = part.match(/\[([^\]]+)\](https?:\/\/[^\s,]+)/);
-    if (!match) continue;
-
-    const quality = normalizeQualityLabel(match[1]!);
-    let url = match[2]!;
-    if (url.includes(':hls:')) {
-      url = url.split(':hls:')[0]!;
-    }
-    if (!urls[quality]) {
-      urls[quality] = url;
-    }
-  }
-
-  return urls;
-}
-
-function parseQualities(text: string): Record<string, string> {
-  if (text.includes('[') && text.includes('http')) {
-    return parseStreamUrlField(text);
-  }
-
-  const urls: Record<string, string> = {};
-  for (const part of text.split(',')) {
-    const quality = part.split(']')[0]?.replace('[', '') ?? 'auto';
-    const pieces = part.split(' ');
-    const url = pieces[pieces.length - 1];
-    if (url?.startsWith('http')) urls[normalizeQualityLabel(quality)] = url.trim();
-  }
-  return urls;
-}
-
-function pickBestQuality(qualities: Record<string, string>): {
-  quality: string;
-  url: string;
-} {
-  const order = ['1080p', '720p', '480p', '360p', '240p'];
-  for (const q of order) {
-    if (qualities[q]) return { quality: q, url: qualities[q]! };
-  }
-  const first = Object.entries(qualities)[0];
-  if (!first) throw new BadRequestException('No stream qualities found');
-  return { quality: first[0], url: first[1] };
-}
-
-function isBotChallengeHtml(html: string): boolean {
-  return (
-    html.includes('anubis_challenge') ||
-    html.includes('не бот') ||
-    html.length < 10000
-  );
-}
+type QualityMap = Record<string, string>;
 
 @Injectable()
-export class RezkaCatalogService implements OnModuleDestroy {
+export class RezkaService implements OnModuleDestroy {
+  private readonly logger = new Logger(RezkaService.name);
   private browser: Browser | null = null;
-  private browserInit: Promise<Browser> | null = null;
+  private launching: Promise<Browser> | null = null;
+  /** Serialize Playwright work — concurrent Chromium contexts OOM small Railway boxes. */
+  private chain: Promise<unknown> = Promise.resolve();
+
+  constructor(private readonly config: ConfigService) {}
 
   async onModuleDestroy() {
-    if (this.browser) {
-      await this.browser.close().catch(() => undefined);
-      this.browser = null;
-      this.browserInit = null;
-    }
+    await this.browser?.close().catch(() => undefined);
+    this.browser = null;
+  }
+
+  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.chain.then(fn, fn);
+    this.chain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private launchArgs(): string[] {
+    const singleProcess =
+      this.config.get<string>('PLAYWRIGHT_SINGLE_PROCESS', 'true') !== 'false';
+
+    return [
+      '--disable-blink-features=AutomationControlled',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-default-apps',
+      '--disable-sync',
+      '--mute-audio',
+      '--no-first-run',
+      '--js-flags=--max-old-space-size=192',
+      ...(singleProcess ? ['--single-process', '--no-zygote'] : []),
+    ];
   }
 
   private async getBrowser(): Promise<Browser> {
     if (this.browser?.isConnected()) return this.browser;
-    if (!this.browserInit) {
-      this.browserInit = chromium
-        .launch({
-          headless: true,
-          args: [
-            '--disable-blink-features=AutomationControlled',
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-          ],
-        })
-        .catch((err) => {
-          this.browserInit = null;
-          // Keep technical detail in logs; show a short user-facing message
-          console.error(
-            '[RezkaCatalog] Playwright launch failed:',
-            err instanceof Error ? err.message : err,
-          );
-          throw new BadRequestException(
-            'Catalog parsing is temporarily unavailable. Try again in a moment, or paste a YouTube / Vimeo link instead.',
-          );
+    if (this.launching) return this.launching;
+
+    this.launching = chromium
+      .launch({
+        headless: true,
+        args: this.launchArgs(),
+        chromiumSandbox: false,
+        handleSIGINT: false,
+        handleSIGTERM: false,
+        handleSIGHUP: false,
+      })
+      .then((browser) => {
+        this.browser = browser;
+        browser.on('disconnected', () => {
+          this.logger.warn('Playwright browser disconnected');
+          this.browser = null;
         });
-    }
-    this.browser = await this.browserInit;
-    return this.browser;
+        this.logger.log('Playwright Chromium ready');
+        return browser;
+      })
+      .catch((err: unknown) => {
+        this.browser = null;
+        const detail = err instanceof Error ? err.message : String(err);
+        this.logger.error(`Playwright launch failed: ${detail}`);
+        throw new ServiceUnavailableException(
+          'Catalog loader is starting up. Wait about a minute and try again — if it keeps failing, contact support.',
+        );
+      })
+      .finally(() => {
+        this.launching = null;
+      });
+
+    return this.launching;
+  }
+
+  private async withPage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
+    return this.enqueue(async () => {
+      let browser: Browser;
+      try {
+        browser = await this.getBrowser();
+      } catch (err) {
+        if (err instanceof ServiceUnavailableException) throw err;
+        throw new ServiceUnavailableException(
+          'Catalog loader is starting up. Wait about a minute and try again — if it keeps failing, contact support.',
+        );
+      }
+
+      const context = await browser.newContext({
+        userAgent:
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        locale: 'ru-RU',
+        viewport: { width: 1280, height: 720 },
+        javaScriptEnabled: true,
+      });
+
+      const page = await context.newPage();
+      try {
+        return await fn(page);
+      } finally {
+        await context.close().catch(() => undefined);
+      }
+    });
   }
 
   private async withCatalogContext<T>(
     catalogUrl: string,
-    fn: (ctx: {
-      html: string;
-      context: BrowserContext;
-      origin: string;
-    }) => Promise<T>,
+    fn: (args: { page: Page; html: string; origin: string }) => Promise<T>,
   ): Promise<T> {
-    const origin = this.resolveOrigin(catalogUrl);
-    const browser = await this.getBrowser();
-    const context = await browser.newContext({
-      userAgent: USER_AGENT,
-      locale: 'ru-RU',
-    });
-
     try {
-      const page = await context.newPage();
-      await page.goto(catalogUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: 60000,
-      });
-
-      try {
-        await page.waitForSelector('#user-favorites-holder, .b-post__title', {
-          state: 'attached',
-          timeout: 45000,
+      return await this.withPage(async (page) => {
+        await page.goto(catalogUrl, {
+          waitUntil: 'domcontentloaded',
+          timeout: 45_000,
         });
-      } catch {
-        const html = await page.content();
-        if (isBotChallengeHtml(html)) {
-          throw new NotFoundException(
-            'Catalog site blocked automated access. Try again in a moment.',
-          );
-        }
-        throw new NotFoundException('Catalog page not recognized');
-      }
+        await page
+          .waitForSelector('#user-favorites-holder', { timeout: 20_000 })
+          .catch(() => undefined);
 
-      const html = await page.content();
-      return await fn({ html, context, origin });
-    } finally {
-      await context.close().catch(() => undefined);
+        const html = await page.content();
+        const origin = new URL(catalogUrl).origin;
+        return fn({ page, html, origin });
+      });
+    } catch (err) {
+      if (
+        err instanceof NotFoundException ||
+        err instanceof ServiceUnavailableException
+      ) {
+        throw err;
+      }
+      const detail = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Catalog fetch failed for ${catalogUrl}: ${detail}`);
+      throw new ServiceUnavailableException(
+        'Could not load this catalog page right now. Check the link and try again in a moment.',
+      );
     }
   }
 
-  private resolveOrigin(url: string): string {
-    const parsed = new URL(url);
-    if (!isRezkaHost(parsed.hostname)) {
-      throw new BadRequestException('This resource is not supported');
+  private decodeStreamUrls(raw: string): QualityMap {
+    const trash =
+      '$$#!@$%^&*()_+|~=`{}[]:;<>?,./№'.split('').concat(['\\', '"', "'"]);
+    let cleaned = raw.trim().replace('#h', '').split('//_//').join('');
+    for (const t of trash) cleaned = cleaned.split(t).join('');
+    const decoded = Buffer.from(cleaned, 'base64').toString('utf8');
+    const map: QualityMap = {};
+    for (const part of decoded.split(',')) {
+      const match = part.match(/\[([^\]]+)](.+)/);
+      if (!match) continue;
+      const quality = match[1]!.trim();
+      const urls = match[2]!.split(' or ').map((u) => u.trim());
+      const mp4 = urls.find((u) => u.includes('.mp4')) ?? urls[0];
+      if (mp4) map[quality] = mp4;
     }
-    return parsed.origin;
+    return map;
+  }
+
+  private pickBestQuality(map: QualityMap): {
+    quality: string;
+    url: string;
+  } | null {
+    const preferred = ['1080p', '720p', '480p', '360p', '240p'];
+    for (const q of preferred) {
+      if (map[q]) return { quality: q, url: map[q]! };
+    }
+    const first = Object.entries(map)[0];
+    return first ? { quality: first[0], url: first[1] } : null;
+  }
+
+  private parseTranslations(root: ReturnType<typeof parseHtml>): CatalogTranslation[] {
+    const list = root.querySelector('#translators-list');
+    if (!list) return [];
+    return list.querySelectorAll('[data-translator_id]').map((el) => ({
+      id: el.getAttribute('data-translator_id') ?? '',
+      title: el.text.trim() || 'Default',
+      premium: el.getAttribute('data-premium') === '1',
+    }));
   }
 
   private normalizeUrl(url: string): string {
-    const parsed = new URL(url.trim());
-    if (!parsed.pathname.endsWith('.html')) {
-      throw new BadRequestException('Link must point to an .html page');
+    let parsed: URL;
+    try {
+      parsed = new URL(url.trim());
+    } catch {
+      throw new NotFoundException('Invalid catalog URL');
+    }
+
+    const host = parsed.hostname.replace(/^www\./, '');
+    const allowed = (this.config.get<string>('REZKA_ALLOWED_HOSTS') ?? '')
+      .split(',')
+      .map((h) => h.trim().replace(/^www\./, ''))
+      .filter(Boolean);
+
+    if (allowed.length && !allowed.includes(host)) {
+      throw new NotFoundException('Catalog host is not allowed');
+    }
+    if (!allowed.length && !host.includes('rezka') && !host.includes('hdrezka')) {
+      throw new NotFoundException('Only Rezka catalog links are supported');
+    }
+
+    if (parsed.protocol !== 'https:') {
+      parsed.protocol = 'https:';
     }
     return parsed.toString();
   }
@@ -339,154 +340,103 @@ export class RezkaCatalogService implements OnModuleDestroy {
     });
   }
 
-  private parseTranslations(root: ReturnType<typeof parseHtml>): CatalogTranslation[] {
-    const list = root.getElementById('translators-list');
-    if (!list) return [];
+  async resolveStream(input: {
+    catalogUrl: string;
+    translationId: string;
+    season?: string;
+    episode?: string;
+  }): Promise<CatalogStreamResult> {
+    const catalogUrl = this.normalizeUrl(input.catalogUrl);
 
-    const seen = new Set<string>();
-    const items: CatalogTranslation[] = [];
+    return this.withCatalogContext(catalogUrl, async ({ page, html, origin }) => {
+      const info = this.parseCatalogHtml(catalogUrl, origin, html);
+      const translation = info.translations.find(
+        (t) => t.id === input.translationId,
+      );
+      if (!translation) throw new NotFoundException('Voice track not found');
 
-    for (const anchor of list.querySelectorAll('a[data-translator_id]')) {
-      const id = anchor.getAttribute('data-translator_id') ?? '';
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      items.push({
-        id,
-        title: anchor.getAttribute('title') ?? anchor.text.trim(),
-      });
-    }
-
-    return items;
-  }
-
-  async resolveStream(
-    catalogUrl: string,
-    translationId: string,
-    season?: string,
-    episode?: string,
-  ): Promise<CatalogStreamResult> {
-    const normalized = this.normalizeUrl(catalogUrl);
-
-    return this.withCatalogContext(normalized, async ({ html, context, origin }) => {
-      const info = this.parseCatalogHtml(normalized, origin, html);
-
-      const payload: Record<string, string> = {
-        id: info.postId,
-        translator_id: translationId,
-      };
+      let seasonId = input.season;
+      let episodeId = input.episode;
+      let seasonNumber: number | undefined;
+      let episodeNumber: number | undefined;
 
       if (info.kind === 'series') {
-        if (!season || !episode) {
-          throw new BadRequestException('Season and episode required for series');
-        }
-        payload.season = season;
-        payload.episode = episode;
-        payload.action = 'get_stream';
-      } else {
-        payload.action = 'get_movie';
+        const season =
+          info.seasons?.find((s) => s.id === seasonId) ??
+          info.seasons?.find((s) => s.id === info.defaults?.seasonId) ??
+          info.seasons?.[0];
+        if (!season) throw new NotFoundException('Season not found');
+        seasonId = season.id;
+        seasonNumber = season.number;
+
+        const episodes = info.episodesBySeason?.[season.id] ?? [];
+        const episode =
+          episodes.find((e) => e.episodeId === episodeId) ??
+          episodes.find((e) => e.episodeId === info.defaults?.episodeId) ??
+          episodes[0];
+        if (!episode) throw new NotFoundException('Episode not found');
+        episodeId = episode.episodeId;
+        episodeNumber = episode.number;
       }
 
-      const response = await context.request.post(
-        `${origin}/ajax/get_cdn_series/`,
-        {
-          form: payload,
-          headers: {
-            Referer: normalized,
-            'X-Requested-With': 'XMLHttpRequest',
-          },
-          timeout: 20000,
+      const soft = this.config.get<string>('REZKA_SOFT_TOKEN', 'soft');
+      const body: Record<string, string> = {
+        id: info.postId,
+        translator_id: translation.id,
+        action: info.kind === 'series' ? 'get_stream' : 'get_movie',
+      };
+      if (info.kind === 'series' && seasonId && episodeId) {
+        body.season = seasonId;
+        body.episode = episodeId;
+      }
+
+      const ajaxUrl = `${origin}/ajax/get_cdn_series/?t=${Date.now()}`;
+      const result = await page.evaluate(
+        async ({ ajaxUrl: url, softToken, payload }) => {
+          const form = new URLSearchParams(payload);
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+              'X-Requested-With': 'XMLHttpRequest',
+              Referer: location.href,
+            },
+            body: `${softToken}=1&${form.toString()}`,
+            credentials: 'include',
+          });
+          return res.json();
         },
+        { ajaxUrl, softToken: soft, payload: body },
       );
 
-      if (!response.ok()) {
-        throw new NotFoundException('Stream not available for this selection');
+      if (!result?.success || !result?.url) {
+        throw new NotFoundException('Stream unavailable for this selection');
       }
 
-      const data = (await response.json()) as { url?: string };
-      const encoded = data?.url;
-      if (!encoded) {
-        throw new NotFoundException('Stream not available for this selection');
-      }
+      const qualities = this.decodeStreamUrls(String(result.url));
+      const best = this.pickBestQuality(qualities);
+      if (!best) throw new NotFoundException('No playable qualities found');
 
-      const qualities = parseQualities(encoded);
-      const best = pickBestQuality(qualities);
-
-      const proxiedUrl = `/backend/catalog/proxy?url=${encodeURIComponent(best.url)}&origin=${encodeURIComponent(origin)}`;
+      const proxyBase = this.config.get<string>('PUBLIC_API_URL');
+      const proxiedUrl = proxyBase
+        ? `${proxyBase.replace(/\/$/, '')}/catalog/proxy?url=${encodeURIComponent(best.url)}`
+        : best.url;
 
       return {
+        provider: 'rezka' as const,
+        title: info.title,
+        thumbnail: info.thumbnail,
         streamUrl: proxiedUrl,
         quality: best.quality,
         qualities,
-        title: info.title,
-        season,
-        episode,
-        translationId,
+        translationId: translation.id,
+        translationTitle: translation.title,
+        seasonId,
+        episodeId,
+        seasonNumber,
+        episodeNumber,
+        kind: info.kind,
       };
     });
-  }
-
-  async proxyStream(
-    targetUrl: string,
-    origin: string,
-    req: Request,
-    res: Response,
-  ): Promise<void> {
-    if (!targetUrl.startsWith('http')) {
-      throw new BadRequestException('Invalid stream URL');
-    }
-
-    const headers: Record<string, string> = {
-      Referer: `${origin}/`,
-      'User-Agent': USER_AGENT,
-    };
-    const range = req.headers.range;
-    if (typeof range === 'string') {
-      headers['Range'] = range;
-    }
-
-    const upstream = await fetch(targetUrl, {
-      headers,
-      redirect: 'follow',
-    });
-
-    if (!upstream.ok && upstream.status !== 206) {
-      throw new NotFoundException(`Stream proxy failed (${upstream.status})`);
-    }
-
-    res.status(upstream.status);
-
-    for (const name of [
-      'content-type',
-      'content-length',
-      'content-range',
-      'accept-ranges',
-    ]) {
-      const value = upstream.headers.get(name);
-      if (value) res.setHeader(name, value);
-    }
-
-    if (!res.getHeader('content-type')) {
-      res.setHeader('Content-Type', 'video/mp4');
-    }
-
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader(
-      'Access-Control-Expose-Headers',
-      'Content-Range, Accept-Ranges, Content-Length',
-    );
-
-    if (!upstream.body) {
-      throw new NotFoundException('Empty stream body');
-    }
-
-    const stream = Readable.fromWeb(
-      upstream.body as import('stream/web').ReadableStream,
-    );
-
-    req.on('close', () => {
-      stream.destroy();
-    });
-
-    stream.pipe(res);
   }
 }
