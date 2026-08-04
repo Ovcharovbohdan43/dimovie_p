@@ -39,7 +39,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV PORT=3000
+# Do NOT hardcode PORT — Railway injects it (often 8080)
 ENV HOSTNAME=0.0.0.0
 
 COPY --from=builder /app/package.json /app/package-lock.json ./
@@ -48,9 +48,6 @@ COPY --from=builder /app/packages/shared ./packages/shared
 COPY --from=builder /app/apps/web ./apps/web
 
 WORKDIR /app/apps/web
-EXPOSE 3000
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-
+# Railway proxies to whatever process.env.PORT the app binds
 CMD ["node", "scripts/start.mjs"]
