@@ -21,7 +21,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { parseVideoUrl, getPlayableStreamUrl } from "@/lib/video-url";
-import { getVideoPreview, canControlPlayback } from "@dimovie/shared";
+import {
+  CHAT_MAX_LENGTH,
+  getVideoPreview,
+  canControlPlayback,
+} from "@dimovie/shared";
 import { RoomPasswordForm } from "@/components/room/room-password-form";
 import { RoomCatalogSetup } from "@/components/room/room-catalog-setup";
 import { HostCatalogControls } from "@/components/room/host-catalog-controls";
@@ -256,9 +260,17 @@ export default function RoomPage({
       ) {
         return prev;
       }
+      const preview =
+        msg.content.length > 80
+          ? `${msg.content.slice(0, 80)}…`
+          : msg.content;
       return [
         ...prev,
-        { id: overlayId, displayName: msg.displayName, content: msg.content },
+        {
+          id: overlayId,
+          displayName: msg.displayName,
+          content: preview,
+        },
       ].slice(-4);
     });
     setTimeout(() => {
@@ -383,16 +395,18 @@ export default function RoomPage({
     (content: string) => {
       const user = me.data;
       if (!user) return;
+      const text = content.trim().slice(0, CHAT_MAX_LENGTH);
+      if (!text) return;
       const optimistic: ChatMessagePayload = {
         id: `opt-${crypto.randomUUID()}`,
         roomId: room.data?.id ?? code,
         userId: user.id,
         displayName: user.displayName,
-        content,
+        content: text,
         createdAt: new Date().toISOString(),
       };
       handleChat(optimistic);
-      const sent = sendChat(content);
+      const sent = sendChat(text);
       if (!sent) {
         setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
         setPlayerComments((prev) =>

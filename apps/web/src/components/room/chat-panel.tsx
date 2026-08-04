@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { ArrowUp, MessageCircle, X } from "lucide-react";
-import type { ChatMessagePayload } from "@dimovie/shared";
+import { CHAT_MAX_LENGTH, type ChatMessagePayload } from "@dimovie/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -59,8 +59,9 @@ export function ChatPanel({
   }, [messages, typingNames]);
 
   const sendMessage = () => {
-    if (!input.trim() || chatCooldown > 0) return;
-    onSend(input.trim());
+    const text = input.trim().slice(0, CHAT_MAX_LENGTH);
+    if (!text || chatCooldown > 0) return;
+    onSend(text);
     setInput("");
   };
 
@@ -77,7 +78,7 @@ export function ChatPanel({
   };
 
   const handleChange = (value: string) => {
-    setInput(value);
+    setInput(value.slice(0, CHAT_MAX_LENGTH));
     if (!onTyping || !value.trim()) return;
     if (typingTimer.current != null) return;
     onTyping();
@@ -166,13 +167,13 @@ export function ChatPanel({
                     )}
                     <div
                       className={cn(
-                        "rounded-2xl px-3 py-2 text-left",
+                        "min-w-0 max-w-full rounded-2xl px-3 py-2 text-left",
                         isOwn
                           ? "rounded-tr-md bg-white/[0.1] ring-1 ring-white/[0.08]"
                           : "rounded-tl-md bg-white/[0.05] ring-1 ring-white/[0.04]",
                       )}
                     >
-                      <p className="text-sm leading-snug text-white/90">
+                      <p className="max-h-36 overflow-y-auto break-words text-sm leading-snug whitespace-pre-wrap text-white/90 [overflow-wrap:anywhere] scrollbar-dimovie">
                         {msg.content}
                       </p>
                       <p
@@ -219,7 +220,9 @@ export function ChatPanel({
           <ChatEmojiPicker
             iconOnly
             className="shrink-0"
-            onInsert={(emoji) => setInput((prev) => prev + emoji)}
+            onInsert={(emoji) =>
+              setInput((prev) => (prev + emoji).slice(0, CHAT_MAX_LENGTH))
+            }
             onReaction={onReaction}
           />
         </div>
@@ -234,7 +237,7 @@ export function ChatPanel({
                 : "Send a message…"
             }
             className="h-11 rounded-2xl border-white/[0.08] bg-white/[0.04] pr-12 text-sm text-white placeholder:text-white/30 focus-visible:ring-white/25"
-            maxLength={500}
+            maxLength={CHAT_MAX_LENGTH}
             disabled={chatCooldown > 0}
           />
           <button
@@ -251,11 +254,24 @@ export function ChatPanel({
             <ArrowUp className="size-4" strokeWidth={2.5} />
           </button>
         </form>
-        {chatCooldown > 0 && (
-          <p className="mt-2 text-center text-[11px] text-white/35">
-            Slow down — {chatCooldown}s until you can send again
+        <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-white/35">
+          {chatCooldown > 0 ? (
+            <p>Slow down — {chatCooldown}s until you can send again</p>
+          ) : (
+            <span />
+          )}
+          <p
+            className={cn(
+              "ml-auto tabular-nums",
+              input.length >= CHAT_MAX_LENGTH && "text-[#ff6b73]",
+              input.length >= Math.floor(CHAT_MAX_LENGTH * 0.85) &&
+                input.length < CHAT_MAX_LENGTH &&
+                "text-white/55",
+            )}
+          >
+            {input.length}/{CHAT_MAX_LENGTH}
           </p>
-        )}
+        </div>
       </div>
     </div>
   );

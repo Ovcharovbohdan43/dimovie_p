@@ -7,6 +7,7 @@ import { randomUUID } from 'crypto';
 import sanitizeHtml from 'sanitize-html';
 import type { ChatMessagePayload, ChatSendResult } from '@dimovie/shared';
 import {
+  CHAT_MAX_LENGTH,
   CHAT_MIN_INTERVAL_MS,
   CHAT_SHADOW_BAN_SEC,
   CHAT_SHADOW_VIOLATIONS,
@@ -42,6 +43,13 @@ export class ChatService {
 
     if (!sanitized) {
       throw new HttpException('Empty message', HttpStatus.BAD_REQUEST);
+    }
+
+    if (sanitized.length > CHAT_MAX_LENGTH) {
+      throw new HttpException(
+        `Message is too long (max ${CHAT_MAX_LENGTH} characters)`,
+        HttpStatus.BAD_REQUEST,
+      );
     }
 
     const now = Date.now();

@@ -1,6 +1,9 @@
 /** Minimum seconds between chat messages for each user. */
 export const CHAT_MIN_INTERVAL_MS = 5000;
 
+/** Hard cap on chat message length (characters after trim/sanitize). */
+export const CHAT_MAX_LENGTH = 200;
+
 /** Cooldown violations within the window before a shadow ban applies. */
 export const CHAT_SHADOW_VIOLATIONS = 3;
 

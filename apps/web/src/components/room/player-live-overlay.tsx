@@ -35,15 +35,17 @@ export function PlayerLiveOverlay({
       aria-hidden
     >
       {/* Comments — left band, transparent pills */}
-      <div className="absolute bottom-[4.75rem] left-2 z-10 flex max-w-[min(44%,15rem)] flex-col-reverse gap-1.5 sm:left-3 sm:max-w-[min(40%,17rem)]">
+      <div className="absolute bottom-[4.75rem] left-2 z-10 flex w-[min(44%,15rem)] max-w-full flex-col-reverse gap-1.5 sm:left-3 sm:w-[min(40%,17rem)]">
         {comments.map((comment) => (
           <div
             key={comment.id}
-            className="live-comment-pill rounded-2xl bg-black/40 px-2.5 py-1.5 ring-1 ring-white/[0.08] backdrop-blur-sm sm:px-3 sm:py-2"
+            className="live-comment-pill min-w-0 rounded-2xl bg-black/40 px-2.5 py-1.5 ring-1 ring-white/[0.08] backdrop-blur-sm sm:px-3 sm:py-2"
           >
-            <p className="text-[11px] leading-snug sm:text-xs">
-              <span className="font-semibold text-white">{comment.displayName}</span>
-              <span className="text-white/75"> {comment.content}</span>
+            <p className="line-clamp-3 break-words text-[11px] leading-snug text-white/75 [overflow-wrap:anywhere] sm:text-xs">
+              <span className="font-semibold text-white">
+                {comment.displayName}
+              </span>{" "}
+              {comment.content}
             </p>
           </div>
         ))}

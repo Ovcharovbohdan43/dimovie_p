@@ -2,7 +2,11 @@
 
 import { useEffect, useRef, useCallback, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { WS_ROOM_EVENTS, CHAT_MIN_INTERVAL_MS } from "@dimovie/shared";
+import {
+  WS_ROOM_EVENTS,
+  CHAT_MAX_LENGTH,
+  CHAT_MIN_INTERVAL_MS,
+} from "@dimovie/shared";
 import type {
   SyncStatePayload,
   SyncIntentPayload,
@@ -270,7 +274,9 @@ export function useRoomSocket({
         onChatErrorRef.current?.("Not connected to the room yet");
         return false;
       }
-      sock.emit(WS_ROOM_EVENTS.CHAT_MESSAGE, { content });
+      const trimmed = content.trim().slice(0, CHAT_MAX_LENGTH);
+      if (!trimmed) return false;
+      sock.emit(WS_ROOM_EVENTS.CHAT_MESSAGE, { content: trimmed });
       applyChatCooldown(Math.ceil(CHAT_MIN_INTERVAL_MS / 1000));
       return true;
     },
