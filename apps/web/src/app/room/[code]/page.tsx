@@ -722,6 +722,13 @@ export default function RoomPage({
                     maxVideoQuality={planFeatures?.maxVideoQuality ?? "1080p"}
                     syncDriftThresholdMs={planFeatures?.syncDriftThresholdMs ?? 1500}
                     canControl={canControlVideo}
+                    voiceDuckFactor={
+                      voice.activeSpeakerCount >= 2
+                        ? 0.4
+                        : voice.activeSpeakerCount === 1
+                          ? 0.7
+                          : 1
+                    }
                     className="ring-0"
                     overlay={
                       <PlayerLiveOverlay
@@ -743,17 +750,23 @@ export default function RoomPage({
                     muted={voice.muted}
                     selfName={me.data?.displayName}
                     selfId={me.data?.id}
+                    selfSpeaking={Boolean(
+                      me.data?.id && voice.speakingById?.[me.data.id],
+                    )}
                     peers={(voice.voicePeers ?? []).map((p) => ({
                       userId: p.userId,
                       displayName:
                         participants.find((x) => x.userId === p.userId)
                           ?.displayName ?? "Guest",
+                      speaking: Boolean(voice.speakingById?.[p.userId]),
+                      deafened: Boolean(voice.deafenedById?.[p.userId]),
                     }))}
                     error={voice.error}
                     needsAudioUnlock={voice.needsAudioUnlock}
                     onJoin={voice.joinVoice}
                     onLeave={voice.leaveVoice}
                     onToggleMute={voice.toggleMute}
+                    onTogglePeerMute={voice.togglePeerMute}
                     onUnlockAudio={voice.unlockRemoteAudio}
                   />
                 ) : null}

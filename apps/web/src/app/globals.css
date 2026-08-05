@@ -255,6 +255,13 @@
     outline-offset: 2px;
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    .dm-speaking {
+      animation: none;
+      outline-color: rgba(91, 159, 212, 0.9);
+    }
+  }
+
   .text-gradient-hero {
     background: linear-gradient(180deg, #fff 0%, #b3b3b3 100%);
     -webkit-background-clip: text;

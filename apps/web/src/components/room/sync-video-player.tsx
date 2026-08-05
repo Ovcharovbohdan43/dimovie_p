@@ -40,6 +40,7 @@ interface SyncVideoPlayerProps {
   onLeave?: () => void;
   maxVideoQuality?: "720p" | "1080p";
   syncDriftThresholdMs?: number;
+  voiceDuckFactor?: number;
   canControl?: boolean;
 }
 
@@ -158,6 +159,7 @@ export function SyncVideoPlayer({
   maxVideoQuality = "1080p",
   syncDriftThresholdMs = 1500,
   canControl = false,
+  voiceDuckFactor = 1,
 }: SyncVideoPlayerProps) {
   const syncDriftThresholdSec = syncDriftThresholdMs / 1000;
   const parsed = parseVideoUrl(url);
@@ -489,6 +491,43 @@ export function SyncVideoPlayer({
 
   const isYoutube = parsed.provider === "youtube";
   const isDirect = parsed.provider === "direct";
+  const duckFactor = Math.min(1, Math.max(0, voiceDuckFactor));
+
+  const applyOutputVolume = useCallback(() => {
+    const base = muted ? 0 : volume;
+    const effective = Math.min(1, Math.max(0, base * duckFactor));
+
+    if (isDirect && videoRef.current) {
+      videoRef.current.volume = effective;
+      videoRef.current.muted = muted || effective <= 0;
+    }
+
+    if (isYoutube && ytPlayer.current && playerReady) {
+      try {
+        if (needsSoundUnlock) return;
+        if (muted || effective <= 0.001) {
+          ytPlayer.current.mute();
+        } else {
+          ytPlayer.current.unMute();
+          ytPlayer.current.setVolume(Math.round(effective * 100));
+        }
+      } catch {
+        /* volume APIs optional */
+      }
+    }
+  }, [
+    muted,
+    volume,
+    duckFactor,
+    isDirect,
+    isYoutube,
+    playerReady,
+    needsSoundUnlock,
+  ]);
+
+  useEffect(() => {
+    applyOutputVolume();
+  }, [applyOutputVolume]);
 
   useEffect(() => {
     if (!isYoutube || !playerReady || !ytPlayer.current) return;
