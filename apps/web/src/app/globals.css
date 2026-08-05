@@ -389,7 +389,7 @@
     appearance: none;
     width: 100%;
     height: 3px;
-    border-radius: 0;
+    border-radius: 9999px;
     background: linear-gradient(
       to right,
       #e50914 0%,
@@ -412,7 +412,7 @@
     appearance: none;
     width: 12px;
     height: 12px;
-    border-radius: 0;
+    border-radius: 9999px;
     background: #fff;
     box-shadow: none;
     cursor: pointer;
@@ -430,7 +430,7 @@
     width: 12px;
     height: 12px;
     border: none;
-    border-radius: 0;
+    border-radius: 9999px;
     background: #fff;
     cursor: pointer;
     opacity: 0;
@@ -444,7 +444,7 @@
 
   .player-scrub::-moz-range-track {
     height: 3px;
-    border-radius: 0;
+    border-radius: 9999px;
     background: transparent;
   }
 
@@ -454,18 +454,24 @@
     min-width: 2.25rem;
     height: 2.25rem;
     padding-inline: 0.35rem;
+    border-radius: 9999px;
     color: rgba(255, 255, 255, 0.85);
-    transition: color 120ms ease, background-color 120ms ease;
+    transition: color 120ms ease, background-color 120ms ease, transform 120ms ease;
   }
 
   .player-ctrl--label {
     min-width: 3rem;
+    border-radius: 9999px;
     letter-spacing: 0.06em;
   }
 
   .player-ctrl:hover:not(:disabled) {
     color: #fff;
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .player-ctrl:active:not(:disabled) {
+    transform: scale(0.96);
   }
 
   .player-ctrl:disabled {

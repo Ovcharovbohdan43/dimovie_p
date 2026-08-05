@@ -6,6 +6,13 @@ import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import type { SyncStatePayload } from "@dimovie/shared";
 import { parseVideoUrl } from "@/lib/video-url";
 import { useYouTubeApiReady, type YTPlayer } from "@/hooks/use-youtube-api";
+import {
+  configureYouTubeIframe,
+  getYouTubePlaying,
+  playYouTubeFromUserGesture,
+  playYouTubeMutedForSync,
+  unmuteYouTubeFromUserGesture,
+} from "@/lib/youtube-playback";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -80,18 +87,23 @@ function applySyncToPlayer(
   ytPlayer: YTPlayer | null,
   videoEl: HTMLVideoElement | null,
   syncDriftThresholdSec: number,
-) {
+  mediaUnlocked: boolean,
+): "ok" | "needs-unmute" {
   if (provider === "youtube" && ytPlayer) {
     const drift = Math.abs(ytPlayer.getCurrentTime() - syncState.time);
     if (drift > syncDriftThresholdSec) {
       ytPlayer.seekTo(syncState.time, true);
     }
     if (syncState.isPlaying) {
-      ytPlayer.playVideo();
-    } else {
-      ytPlayer.pauseVideo();
+      if (mediaUnlocked) {
+        playYouTubeFromUserGesture(ytPlayer);
+        return "ok";
+      }
+      playYouTubeMutedForSync(ytPlayer);
+      return "needs-unmute";
     }
-    return;
+    ytPlayer.pauseVideo();
+    return "ok";
   }
 
   if (provider === "direct" && videoEl) {
@@ -104,6 +116,7 @@ function applySyncToPlayer(
       videoEl.pause();
     }
   }
+  return "ok";
 }
 
 export function SyncVideoPlayer({
@@ -131,6 +144,8 @@ export function SyncVideoPlayer({
   const lastLocalAction = useRef(0);
   const onIntentRef = useRef(onIntent);
   const syncStateRef = useRef(syncState);
+  const mediaUnlockedRef = useRef(false);
+  const playRetryTimers = useRef<number[]>([]);
   const [playerReady, setPlayerReady] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [qualities, setQualities] = useState<string[]>([]);
@@ -149,10 +164,20 @@ export function SyncVideoPlayer({
   const [videoLoading, setVideoLoading] = useState(false);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(1);
+  const [needsSoundUnlock, setNeedsSoundUnlock] = useState(false);
   const hideTimer = useRef<number | null>(null);
 
   onIntentRef.current = onIntent;
   syncStateRef.current = syncState;
+
+  const clearPlayRetries = useCallback(() => {
+    playRetryTimers.current.forEach((id) => window.clearTimeout(id));
+    playRetryTimers.current = [];
+  }, []);
+
+  const markMediaUnlocked = useCallback(() => {
+    mediaUnlockedRef.current = true;
+  }, []);
 
   useEffect(() => {
     if (!broadcastEnded) return;
@@ -168,6 +193,8 @@ export function SyncVideoPlayer({
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
 
+  useEffect(() => () => clearPlayRetries(), [clearPlayRetries]);
+
   const getTime = useCallback((): number => {
     if (parsed.provider === "youtube" && ytPlayer.current) {
       return ytPlayer.current.getCurrentTime() ?? 0;
@@ -177,6 +204,34 @@ export function SyncVideoPlayer({
     }
     return syncState?.time ?? 0;
   }, [parsed.provider, syncState?.time]);
+
+  const unlockYouTubeSound = useCallback(() => {
+    const player = ytPlayer.current;
+    if (!player) return;
+    markMediaUnlocked();
+    setNeedsSoundUnlock(false);
+    applyingRemote.current = true;
+    const target = syncStateRef.current;
+    if (target) {
+      const drift = Math.abs(player.getCurrentTime() - target.time);
+      if (drift > syncDriftThresholdSec) {
+        player.seekTo(target.time, true);
+      }
+      if (target.isPlaying) {
+        playYouTubeFromUserGesture(player);
+        setYtPlaying(true);
+      } else {
+        unmuteYouTubeFromUserGesture(player);
+        player.pauseVideo();
+        setYtPlaying(false);
+      }
+    } else {
+      unmuteYouTubeFromUserGesture(player);
+    }
+    window.setTimeout(() => {
+      applyingRemote.current = false;
+    }, 400);
+  }, [markMediaUnlocked, syncDriftThresholdSec]);
 
   useEffect(() => {
     if (!syncState || syncState.version <= localVersion.current) return;
@@ -191,17 +246,23 @@ export function SyncVideoPlayer({
     localVersion.current = syncState.version;
     applyingRemote.current = true;
 
-    applySyncToPlayer(
+    const result = applySyncToPlayer(
       syncState,
       parsed.provider,
       ytPlayer.current,
       videoRef.current,
       syncDriftThresholdSec,
+      mediaUnlockedRef.current,
     );
 
     if (parsed.provider === "youtube") {
       setYtTime(syncState.time);
       setYtPlaying(syncState.isPlaying);
+      if (result === "needs-unmute" && syncState.isPlaying) {
+        setNeedsSoundUnlock(true);
+      } else if (!syncState.isPlaying) {
+        setNeedsSoundUnlock(false);
+      }
     }
 
     setTimeout(() => {
@@ -213,6 +274,9 @@ export function SyncVideoPlayer({
     if (parsed.provider !== "youtube" || !parsed.videoId || !ytReady) return;
 
     setPlayerReady(false);
+    setNeedsSoundUnlock(false);
+    mediaUnlockedRef.current = false;
+    clearPlayRetries();
     const containerId = `yt-${playerId}`;
 
     const player = new window.YT!.Player(containerId, {
@@ -228,11 +292,14 @@ export function SyncVideoPlayer({
         enablejsapi: 1,
         cc_load_policy: 1,
         fs: 0,
+        playsinline: 1,
+        iv_load_policy: 3,
         origin: window.location.origin,
       },
       events: {
         onReady: (event: { target: YTPlayer }) => {
           ytPlayer.current = event.target;
+          configureYouTubeIframe(event.target);
           setPlayerReady(true);
 
           try {
@@ -273,43 +340,81 @@ export function SyncVideoPlayer({
             const state = syncStateRef.current;
             localVersion.current = state.version;
             applyingRemote.current = true;
-            applySyncToPlayer(state, "youtube", event.target, null, syncDriftThresholdSec);
+            const result = applySyncToPlayer(
+              state,
+              "youtube",
+              event.target,
+              null,
+              syncDriftThresholdSec,
+              mediaUnlockedRef.current,
+            );
+            setYtTime(state.time);
+            setYtPlaying(state.isPlaying);
+            if (result === "needs-unmute" && state.isPlaying) {
+              setNeedsSoundUnlock(true);
+            }
             setTimeout(() => {
               applyingRemote.current = false;
             }, 400);
           }
         },
         onStateChange: (event: { data: number }) => {
+          const YT = window.YT!;
+          if (event.data === YT.PlayerState.PLAYING) {
+            setYtPlaying(true);
+            try {
+              if (ytPlayer.current?.isMuted() && !mediaUnlockedRef.current) {
+                setNeedsSoundUnlock(true);
+              }
+            } catch {
+              /* ignore */
+            }
+          } else if (
+            event.data === YT.PlayerState.PAUSED ||
+            event.data === YT.PlayerState.ENDED
+          ) {
+            setYtPlaying(false);
+          }
+
           if (applyingRemote.current || !canControl) return;
           const now = Date.now();
           if (now - lastLocalAction.current < 500) return;
 
-          const YT = window.YT!;
           const time = ytPlayer.current?.getCurrentTime() ?? 0;
 
           if (event.data === YT.PlayerState.PLAYING) {
-            setYtPlaying(true);
             lastLocalAction.current = now;
             onIntentRef.current("PLAY", time);
           } else if (event.data === YT.PlayerState.PAUSED) {
-            setYtPlaying(false);
             lastLocalAction.current = now;
             onIntentRef.current("PAUSE", time);
-          } else if (event.data === YT.PlayerState.ENDED) {
-            setYtPlaying(false);
           }
+        },
+        onError: () => {
+          setVideoError("YouTube couldn’t play this video. Try another link.");
         },
       },
     });
 
     return () => {
+      clearPlayRetries();
       player.destroy();
       ytPlayer.current = null;
       setPlayerReady(false);
       setYtTime(0);
       setYtDuration(0);
+      setNeedsSoundUnlock(false);
     };
-  }, [parsed.provider, parsed.videoId, ytReady, playerId, maxVideoQuality, syncDriftThresholdSec, canControl]);
+  }, [
+    parsed.provider,
+    parsed.videoId,
+    ytReady,
+    playerId,
+    maxVideoQuality,
+    syncDriftThresholdSec,
+    canControl,
+    clearPlayRetries,
+  ]);
 
   const isYoutube = parsed.provider === "youtube";
   const isDirect = parsed.provider === "direct";
@@ -379,17 +484,31 @@ export function SyncVideoPlayer({
     const time = getTime();
     lastLocalAction.current = Date.now();
     applyingRemote.current = true;
+    clearPlayRetries();
 
     if (parsed.provider === "youtube" && ytPlayer.current) {
-      const isPlaying = syncState?.isPlaying ?? ytPlaying;
-      if (isPlaying) {
+      markMediaUnlocked();
+      setNeedsSoundUnlock(false);
+      const actuallyPlaying = getYouTubePlaying(ytPlayer.current);
+      if (actuallyPlaying) {
         ytPlayer.current.pauseVideo();
         setYtPlaying(false);
+        onIntentRef.current("PAUSE", time);
       } else {
-        ytPlayer.current.playVideo();
+        playYouTubeFromUserGesture(ytPlayer.current);
         setYtPlaying(true);
+        onIntentRef.current("PLAY", time);
+
+        // Verify playback started; recover from Chrome's silent first-call drop.
+        const retryId = window.setTimeout(() => {
+          const player = ytPlayer.current;
+          if (!player || !canControl) return;
+          if (!getYouTubePlaying(player)) {
+            playYouTubeFromUserGesture(player);
+          }
+        }, 220);
+        playRetryTimers.current.push(retryId);
       }
-      onIntentRef.current(isPlaying ? "PAUSE" : "PLAY", time);
     } else if (parsed.provider === "direct" && videoRef.current) {
       const el = videoRef.current;
       if (!el.paused) {
@@ -413,7 +532,18 @@ export function SyncVideoPlayer({
     setTimeout(() => {
       applyingRemote.current = false;
     }, 400);
-  }, [getTime, syncState?.isPlaying, parsed.provider, canControl, ytPlaying]);
+  }, [
+    getTime,
+    syncState?.isPlaying,
+    parsed.provider,
+    canControl,
+    clearPlayRetries,
+    markMediaUnlocked,
+  ]);
+
+  const handleStagePointerDown = useCallback(() => {
+    markMediaUnlocked();
+  }, [markMediaUnlocked]);
 
   const toggleFullscreen = useCallback(async () => {
     const el = containerRef.current;
@@ -464,11 +594,7 @@ export function SyncVideoPlayer({
 
   const showQuality = isYoutube && qualities.length > 0;
   const showCaptions = isYoutube;
-  const uiPlaying = isDirect
-    ? directPlaying
-    : isYoutube
-      ? (syncState?.isPlaying ?? ytPlaying)
-      : (syncState?.isPlaying ?? false);
+  const locallyPlaying = isDirect ? directPlaying : isYoutube ? ytPlaying : false;
   const progressMax = isDirect ? directDuration : isYoutube ? ytDuration : 0;
   const progressValue = Math.min(
     seekValue ?? (isDirect ? directTime : isYoutube ? ytTime : 0),
@@ -477,7 +603,7 @@ export function SyncVideoPlayer({
   const uiTime = seekValue ?? (isDirect ? directTime : isYoutube ? ytTime : (syncState?.time ?? 0));
   const showProgress = (isDirect || isYoutube) && progressMax > 0;
   const controlsVisible =
-    controlsPinned || scrubbing || seekValue !== null || !uiPlaying;
+    controlsPinned || scrubbing || seekValue !== null || !locallyPlaying || needsSoundUnlock;
 
   const clearHideTimer = useCallback(() => {
     if (hideTimer.current != null) {
@@ -493,7 +619,7 @@ export function SyncVideoPlayer({
 
   const scheduleHideControls = useCallback(() => {
     clearHideTimer();
-    if (scrubbing || seekValue !== null) return;
+    if (scrubbing || seekValue !== null || needsSoundUnlock) return;
     const playing = isDirect
       ? directPlaying
       : isYoutube
@@ -507,6 +633,7 @@ export function SyncVideoPlayer({
     clearHideTimer,
     scrubbing,
     seekValue,
+    needsSoundUnlock,
     isDirect,
     isYoutube,
     directPlaying,
@@ -514,8 +641,42 @@ export function SyncVideoPlayer({
     ytPlaying,
   ]);
 
+  // Attach reveal/schedule into stage click after they exist
+  const handleStageClickStable = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (broadcastEnded) return;
+      if ((e.target as HTMLElement).closest("[data-player-chrome]")) return;
+
+      if (isYoutube && needsSoundUnlock) {
+        unlockYouTubeSound();
+        revealControls();
+        scheduleHideControls();
+        return;
+      }
+
+      if (!canControl || (!isYoutube && !isDirect)) return;
+      if (!playerReady) return;
+
+      revealControls();
+      togglePlay();
+      scheduleHideControls();
+    },
+    [
+      broadcastEnded,
+      isYoutube,
+      isDirect,
+      needsSoundUnlock,
+      unlockYouTubeSound,
+      canControl,
+      playerReady,
+      togglePlay,
+      revealControls,
+      scheduleHideControls,
+    ],
+  );
+
   useEffect(() => {
-    if (!uiPlaying || scrubbing || seekValue !== null) {
+    if (!locallyPlaying || scrubbing || seekValue !== null || needsSoundUnlock) {
       setControlsPinned(true);
       clearHideTimer();
       return;
@@ -523,9 +684,10 @@ export function SyncVideoPlayer({
     scheduleHideControls();
     return clearHideTimer;
   }, [
-    uiPlaying,
+    locallyPlaying,
     scrubbing,
     seekValue,
+    needsSoundUnlock,
     scheduleHideControls,
     clearHideTimer,
   ]);
@@ -540,6 +702,13 @@ export function SyncVideoPlayer({
 
       if (e.key === " " || e.key === "k" || e.key === "K") {
         e.preventDefault();
+        markMediaUnlocked();
+        if (isYoutube && needsSoundUnlock) {
+          unlockYouTubeSound();
+          revealControls();
+          scheduleHideControls();
+          return;
+        }
         revealControls();
         togglePlay();
         scheduleHideControls();
@@ -547,6 +716,23 @@ export function SyncVideoPlayer({
         e.preventDefault();
         void (isYoutube ? toggleFullscreen() : toggleDirectFullscreen());
       } else if (e.key === "m" || e.key === "M") {
+        if (isYoutube && ytPlayer.current) {
+          e.preventDefault();
+          markMediaUnlocked();
+          try {
+            if (ytPlayer.current.isMuted()) {
+              unmuteYouTubeFromUserGesture(ytPlayer.current);
+              setNeedsSoundUnlock(false);
+              setMuted(false);
+            } else {
+              ytPlayer.current.mute();
+              setMuted(true);
+            }
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
         if (!isDirect || !videoRef.current) return;
         e.preventDefault();
         const next = !videoRef.current.muted;
@@ -584,6 +770,9 @@ export function SyncVideoPlayer({
     progressMax,
     getTime,
     commitSeek,
+    markMediaUnlocked,
+    needsSoundUnlock,
+    unlockYouTubeSound,
   ]);
 
   const handleContainerMouseLeave = useCallback(
@@ -610,13 +799,22 @@ export function SyncVideoPlayer({
     );
   }
 
+  const showCenterPlay =
+    (isYoutube || isDirect) &&
+    playerReady &&
+    !broadcastEnded &&
+    !locallyPlaying &&
+    canControl &&
+    !needsSoundUnlock;
+  const showUnlockCue = isYoutube && playerReady && !broadcastEnded && needsSoundUnlock;
+
   return (
     <div
       ref={containerRef}
       tabIndex={0}
       className={cn(
         "group/player relative aspect-video w-full select-none overflow-hidden bg-black outline-none ring-1 ring-white/[0.06] focus-visible:ring-[#e50914]/50",
-        uiPlaying && !controlsVisible && "cursor-none",
+        locallyPlaying && !controlsVisible && !needsSoundUnlock && "cursor-none",
         className,
       )}
       onMouseMove={() => {
@@ -630,31 +828,10 @@ export function SyncVideoPlayer({
       }}
     >
       {parsed.provider === "youtube" && (
-        <div id={`yt-${playerId}`} className="absolute inset-0 h-full w-full" />
-      )}
-
-      {(isYoutube || isDirect) && playerReady && !broadcastEnded && (
-        <button
-          type="button"
-          className={cn(
-            "absolute inset-0 z-[15] flex items-center justify-center bg-transparent",
-            !canControl && "cursor-default",
-          )}
-          aria-label={uiPlaying ? "Pause" : "Play"}
-          disabled={!canControl}
-          onClick={() => {
-            if (!canControl) return;
-            revealControls();
-            togglePlay();
-            scheduleHideControls();
-          }}
-        >
-          {!uiPlaying && canControl && (
-            <span className="pointer-events-none grid size-14 place-items-center bg-[#e50914] text-white transition duration-200 group-hover/player:scale-[1.03] sm:size-16">
-              <PlayMark className="ml-0.5 size-6 sm:size-7" />
-            </span>
-          )}
-        </button>
+        <div
+          id={`yt-${playerId}`}
+          className="pointer-events-none absolute inset-0 h-full w-full [&>iframe]:pointer-events-none [&>iframe]:h-full [&>iframe]:w-full"
+        />
       )}
 
       {parsed.provider === "direct" && (
@@ -722,13 +899,54 @@ export function SyncVideoPlayer({
         />
       )}
 
+      {/* Unified stage hit-target — owns play/pause & sound unlock without fighting YT iframe */}
+      {(isYoutube || isDirect) && playerReady && !broadcastEnded && (
+        <div
+          className={cn(
+            "absolute inset-0 z-[15]",
+            canControl || needsSoundUnlock ? "cursor-pointer" : "cursor-default",
+          )}
+          onPointerDown={handleStagePointerDown}
+          onClick={handleStageClickStable}
+          role="presentation"
+        >
+          {showCenterPlay && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <span className="grid size-14 place-items-center rounded-full bg-[#e50914] text-white shadow-[0_12px_40px_rgba(229,9,20,0.35)] transition duration-200 group-hover/player:scale-[1.04] sm:size-16">
+                <PlayMark className="ml-0.5 size-6 sm:size-7" />
+              </span>
+            </div>
+          )}
+
+          {showUnlockCue && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/45 px-4 backdrop-blur-[2px]">
+              <button
+                type="button"
+                className="pointer-events-auto flex items-center gap-3 rounded-full border border-white/15 bg-[#0e0e14]/92 px-5 py-3 text-sm font-semibold text-white shadow-[0_16px_48px_rgba(0,0,0,0.45)] transition hover:border-white/25 hover:bg-[#14141c]"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  unlockYouTubeSound();
+                  revealControls();
+                  scheduleHideControls();
+                }}
+              >
+                <span className="grid size-10 place-items-center rounded-full bg-[#e50914]">
+                  <VolumeMark className="size-5" />
+                </span>
+                Tap to enable sound
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {isDirect && videoLoading && !videoError && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60">
           <LoadingSpinner size="lg" className="border-white/20 border-t-[#e50914]" />
         </div>
       )}
 
-      {isDirect && videoError && (
+      {videoError && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/80 px-6 text-center">
           <AlertCircle className="size-8 text-[#e50914]" />
           <p className="text-sm text-white/70">{videoError}</p>
@@ -757,7 +975,7 @@ export function SyncVideoPlayer({
             {onLeave && (
               <button
                 type="button"
-                className="mt-6 h-10 bg-[#e50914] px-5 text-xs font-semibold uppercase tracking-[0.1em] text-white transition hover:bg-[#f40612]"
+                className="mt-6 h-10 rounded-full bg-[#e50914] px-5 text-xs font-semibold uppercase tracking-[0.1em] text-white transition hover:bg-[#f40612]"
                 onClick={onLeave}
               >
                 Go home
@@ -768,6 +986,7 @@ export function SyncVideoPlayer({
       )}
 
       <div
+        data-player-chrome
         className={cn(
           "absolute inset-x-0 bottom-0 z-30 transition-opacity duration-200 ease-out",
           controlsVisible && !broadcastEnded
@@ -775,6 +994,8 @@ export function SyncVideoPlayer({
             : "pointer-events-none opacity-0",
         )}
         onMouseEnter={revealControls}
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="player-controls-fade px-3 pb-2.5 pt-16 sm:px-4 sm:pb-3">
           {showProgress && (
@@ -826,26 +1047,33 @@ export function SyncVideoPlayer({
             </div>
           )}
 
-          <div className="flex items-center gap-0.5 sm:gap-1">
+          <div className="flex items-center gap-1 sm:gap-1.5">
             <button
               type="button"
               className="player-ctrl"
               onClick={(e) => {
                 e.stopPropagation();
+                markMediaUnlocked();
+                if (isYoutube && needsSoundUnlock) {
+                  unlockYouTubeSound();
+                  return;
+                }
                 revealControls();
                 togglePlay();
                 scheduleHideControls();
               }}
-              disabled={!canControl}
+              disabled={!canControl && !(isYoutube && needsSoundUnlock)}
               title={
-                canControl
-                  ? uiPlaying
-                    ? "Pause"
-                    : "Play"
-                  : "Only the host can control playback"
+                needsSoundUnlock
+                  ? "Enable sound"
+                  : canControl
+                    ? locallyPlaying
+                      ? "Pause"
+                      : "Play"
+                    : "Only the host can control playback"
               }
             >
-              {uiPlaying ? (
+              {locallyPlaying ? (
                 <PauseMark className="size-4" />
               ) : (
                 <PlayMark className="ml-0.5 size-4" />
@@ -862,7 +1090,7 @@ export function SyncVideoPlayer({
               )}
             </div>
 
-            {isDirect && (
+            {(isDirect || isYoutube) && (
               <div className="flex items-center gap-0.5">
                 <button
                   type="button"
@@ -870,6 +1098,23 @@ export function SyncVideoPlayer({
                   title={muted || volume === 0 ? "Unmute" : "Mute"}
                   onClick={(e) => {
                     e.stopPropagation();
+                    markMediaUnlocked();
+                    if (isYoutube && ytPlayer.current) {
+                      try {
+                        if (ytPlayer.current.isMuted() || muted) {
+                          unmuteYouTubeFromUserGesture(ytPlayer.current);
+                          setNeedsSoundUnlock(false);
+                          setMuted(false);
+                          if (volume === 0) setVolume(0.8);
+                        } else {
+                          ytPlayer.current.mute();
+                          setMuted(true);
+                        }
+                      } catch {
+                        /* ignore */
+                      }
+                      return;
+                    }
                     const el = videoRef.current;
                     if (!el) return;
                     if (muted || volume === 0) {
@@ -883,35 +1128,37 @@ export function SyncVideoPlayer({
                     }
                   }}
                 >
-                  {muted || volume === 0 ? (
+                  {muted || volume === 0 || needsSoundUnlock ? (
                     <VolumeMuteMark className="size-4" />
                   ) : (
                     <VolumeMark className="size-4" />
                   )}
                 </button>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={muted ? 0 : volume}
-                  aria-label="Volume"
-                  className="player-scrub hidden w-14 sm:block sm:w-16"
-                  style={
-                    {
-                      "--progress": `${(muted ? 0 : volume) * 100}%`,
-                    } as React.CSSProperties
-                  }
-                  onChange={(e) => {
-                    const next = Number(e.target.value);
-                    setVolume(next);
-                    setMuted(next === 0);
-                    if (videoRef.current) {
-                      videoRef.current.volume = next;
-                      videoRef.current.muted = next === 0;
+                {isDirect && (
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={muted ? 0 : volume}
+                    aria-label="Volume"
+                    className="player-scrub hidden w-14 sm:block sm:w-16"
+                    style={
+                      {
+                        "--progress": `${(muted ? 0 : volume) * 100}%`,
+                      } as React.CSSProperties
                     }
-                  }}
-                />
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      setVolume(next);
+                      setMuted(next === 0);
+                      if (videoRef.current) {
+                        videoRef.current.volume = next;
+                        videoRef.current.muted = next === 0;
+                      }
+                    }}
+                  />
+                )}
               </div>
             )}
 
@@ -942,14 +1189,14 @@ export function SyncVideoPlayer({
                 />
                 <DropdownMenuContent
                   align="end"
-                  className="min-w-[7rem] rounded-none border-white/10 bg-[#0c0c10] p-1"
+                  className="min-w-[7rem] rounded-xl border-white/10 bg-[#0c0c10] p-1"
                 >
                   {qualities.map((q) => (
                     <DropdownMenuItem
                       key={q}
                       onClick={() => setQuality(q)}
                       className={cn(
-                        "rounded-none font-mono text-xs",
+                        "rounded-lg font-mono text-xs",
                         activeQuality === q && "bg-white/[0.04] text-[#e50914]",
                       )}
                     >

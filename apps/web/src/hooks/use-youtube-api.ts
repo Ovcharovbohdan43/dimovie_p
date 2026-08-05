@@ -10,17 +10,19 @@ declare global {
         options: Record<string, unknown>,
       ) => YTPlayer;
       PlayerState: {
+        UNSTARTED: number;
+        ENDED: number;
         PLAYING: number;
         PAUSED: number;
         BUFFERING: number;
-        ENDED: number;
+        CUED: number;
       };
     };
     onYouTubeIframeAPIReady?: () => void;
   }
 }
 
-interface YTPlayer {
+export interface YTPlayer {
   playVideo: () => void;
   pauseVideo: () => void;
   seekTo: (seconds: number, allowSeekAhead: boolean) => void;
@@ -33,6 +35,12 @@ interface YTPlayer {
   loadModule: (module: string) => void;
   setOption: (module: string, option: string, value: unknown) => void;
   getOption: (module: string, option: string) => unknown;
+  mute: () => void;
+  unMute: () => void;
+  isMuted: () => boolean;
+  setVolume: (volume: number) => void;
+  getVolume: () => number;
+  getIframe: () => HTMLIFrameElement;
   destroy: () => void;
 }
 
@@ -54,6 +62,8 @@ export function loadYouTubeApi(): Promise<void> {
         const tag = document.createElement("script");
         tag.src = "https://www.youtube.com/iframe_api";
         document.head.appendChild(tag);
+      } else if (window.YT?.Player) {
+        resolve();
       }
     });
   }
@@ -61,13 +71,11 @@ export function loadYouTubeApi(): Promise<void> {
   return ytApiPromise;
 }
 
-export type { YTPlayer };
-
 export function useYouTubeApiReady() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    loadYouTubeApi().then(() => setReady(true));
+    void loadYouTubeApi().then(() => setReady(true));
   }, []);
 
   return ready;
