@@ -24,7 +24,7 @@ export function SyncStrip() {
   const reduceMotion = useReducedMotion();
 
   return (
-    <section className="relative px-4 py-16 sm:px-6 md:px-10 md:py-24 lg:px-14">
+    <section className="relative px-4 py-12 sm:px-6 sm:py-16 md:px-10 md:py-24 lg:px-14">
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
       <motion.div
         className="mx-auto max-w-5xl text-center"
@@ -33,10 +33,10 @@ export function SyncStrip() {
         viewport={{ once: true, margin: "-15% 0px" }}
         transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
       >
-        <h2 className="font-display text-[clamp(1.85rem,4.5vw,3rem)] font-semibold leading-[1.12] tracking-[-0.03em] text-white">
+        <h2 className="font-display text-[clamp(1.55rem,5vw,3rem)] font-semibold leading-[1.12] tracking-[-0.03em] text-white">
           What the room actually does
         </h2>
-        <p className="mx-auto mt-4 max-w-[46ch] text-sm leading-relaxed text-white/60 md:text-base">
+        <p className="mx-auto mt-3 max-w-[46ch] text-sm leading-relaxed text-white/60 sm:mt-4 md:text-base">
           Not a theater poster. DiMovie keeps playback honest, keeps the
           conversation next to the picture, and gets friends in without a setup
           maze.
@@ -44,7 +44,7 @@ export function SyncStrip() {
       </motion.div>
 
       <motion.ul
-        className="mx-auto mt-12 grid max-w-5xl gap-px bg-white/10 sm:grid-cols-3"
+        className="mx-auto mt-8 grid max-w-5xl gap-px bg-white/10 sm:mt-12 sm:grid-cols-3"
         initial={reduceMotion ? false : "hidden"}
         whileInView="visible"
         viewport={{ once: true, margin: "-10% 0px" }}

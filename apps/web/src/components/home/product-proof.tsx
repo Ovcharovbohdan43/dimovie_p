@@ -2,6 +2,11 @@
 
 import Image from "next/image";
 import { motion, useReducedMotion } from "motion/react";
+import {
+  RevealCopy,
+  RevealEyebrow,
+  RevealHeadline,
+} from "@/components/home/text-reveal";
 
 const beats = [
   {
@@ -39,7 +44,7 @@ export function ProductProof() {
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#00a8e1]">
           Real product, real rooms
         </p>
-        <h2 className="mt-3 font-display text-[clamp(1.75rem,4vw,2.75rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-white">
+        <h2 className="mt-3 font-display text-[clamp(1.55rem,5vw,2.75rem)] font-semibold leading-[1.12] tracking-[-0.03em] text-white">
           Built around the night you actually throw
         </h2>
         <p className="mt-3 max-w-[48ch] text-sm leading-relaxed text-white/60 md:text-base">
@@ -48,17 +53,13 @@ export function ProductProof() {
         </p>
       </motion.div>
 
-      <div className="mt-12 space-y-16 md:mt-16 md:space-y-24">
+      <div className="mt-10 space-y-14 sm:mt-12 md:mt-16 md:space-y-24">
         {beats.map((beat, i) => {
           const reverse = i % 2 === 1;
           return (
-            <motion.article
+            <article
               key={beat.title}
-              className="grid items-center gap-6 md:grid-cols-12 md:gap-10"
-              initial={reduceMotion ? false : { opacity: 0, y: 36 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: "-10% 0px" }}
-              transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+              className="grid items-center gap-5 sm:gap-6 md:grid-cols-12 md:gap-10"
             >
               <div
                 className={
@@ -67,7 +68,7 @@ export function ProductProof() {
                     : "md:col-span-7"
                 }
               >
-                <div className="relative aspect-[16/10] overflow-hidden rounded-[4px] md:aspect-[16/9]">
+                <div className="relative aspect-[16/11] overflow-hidden rounded-[4px] sm:aspect-[16/10] md:aspect-[16/9]">
                   <Image
                     src={beat.image}
                     alt={beat.alt}
@@ -93,17 +94,18 @@ export function ProductProof() {
                     : "md:col-span-4 md:col-start-9"
                 }
               >
-                <p className="font-display text-sm font-semibold tracking-[0.18em] text-[#e50914]">
+                <RevealEyebrow className="font-display text-sm font-semibold tracking-[0.18em] text-[#e50914]">
                   {String(i + 1).padStart(2, "0")}
-                </p>
-                <h3 className="mt-3 font-display text-2xl font-semibold tracking-[-0.02em] text-white md:text-3xl">
-                  {beat.title}
-                </h3>
-                <p className="mt-3 max-w-[36ch] text-sm leading-relaxed text-white/65 md:text-base">
+                </RevealEyebrow>
+                <RevealHeadline
+                  text={beat.title}
+                  className="mt-2 font-display text-[1.35rem] font-semibold tracking-[-0.02em] text-white sm:mt-3 sm:text-2xl md:text-3xl"
+                />
+                <RevealCopy className="mt-2 max-w-[36ch] text-sm leading-relaxed text-white/65 sm:mt-3 md:text-base">
                   {beat.copy}
-                </p>
+                </RevealCopy>
               </div>
-            </motion.article>
+            </article>
           );
         })}
       </div>

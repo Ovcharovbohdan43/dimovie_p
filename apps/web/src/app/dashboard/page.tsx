@@ -135,16 +135,16 @@ function DashboardContent() {
     <div className="dm-app relative min-h-screen overflow-hidden pb-20 pt-16">
       <div className="relative mx-auto max-w-[1920px] px-4 sm:px-6 md:px-10 lg:px-14">
         <motion.div
-          className="mb-10 flex flex-col gap-6 border-b border-white/[0.06] pb-8 pt-8 sm:mb-12 sm:flex-row sm:items-end sm:justify-between md:pt-10"
+          className="mb-8 flex flex-col gap-5 border-b border-white/[0.06] pb-7 pt-6 sm:mb-12 sm:flex-row sm:items-end sm:justify-between sm:gap-6 sm:pb-8 sm:pt-8 md:pt-10"
           initial={reduceMotion ? false : { opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
         >
-          <div className="max-w-xl">
+          <div className="min-w-0 max-w-xl">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/40">
               Your stage
             </p>
-            <h1 className="mt-2 font-sans text-[clamp(1.85rem,4vw,2.85rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-white">
+            <h1 className="mt-2 break-words font-sans text-[clamp(1.55rem,5.5vw,2.85rem)] font-semibold leading-[1.12] tracking-[-0.03em] text-white">
               Welcome back, {me.data?.displayName}
             </h1>
             <p className="mt-2 text-sm text-white/55 md:text-base">
@@ -155,7 +155,7 @@ function DashboardContent() {
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger
               render={
-                <Button className="h-11 bg-[#e50914] px-5 text-[0.95rem] font-semibold hover:bg-[#f40612]">
+                <Button className="h-11 w-full bg-[#e50914] px-5 text-[0.95rem] font-semibold hover:bg-[#f40612] sm:w-auto">
                   <PlusMark className="mr-2 size-4" />
                   New party
                 </Button>

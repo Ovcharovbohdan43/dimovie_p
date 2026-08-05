@@ -68,11 +68,11 @@ export function RoomCodeSearch({
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="rounded-full p-2 text-white/70 hover:bg-white/10 hover:text-white"
+          className="grid size-8 place-items-center rounded-full text-white/70 hover:bg-white/10 hover:text-white sm:size-9"
           aria-label="Search by room code"
           aria-expanded={open}
         >
-          <Search className="size-5" />
+          <Search className="size-4 sm:size-5" />
         </button>
         {open && (
           <>
@@ -114,7 +114,7 @@ export function RoomCodeSearch({
       <Input
         {...inputProps}
         placeholder="Search by room code..."
-        className="h-9 w-52 border-white/10 bg-white/5 pl-9 text-sm uppercase tracking-widest placeholder:normal-case placeholder:tracking-normal lg:w-60"
+        className="h-9 w-52 border-white/20 bg-black/55 pl-9 text-sm uppercase tracking-widest placeholder:normal-case placeholder:tracking-normal shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)] backdrop-blur-md lg:w-60"
         aria-label="Search by room code"
       />
       {error && (

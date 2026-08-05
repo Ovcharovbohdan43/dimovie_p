@@ -48,12 +48,13 @@ export function Navbar() {
           : "border-b border-transparent bg-gradient-to-b from-black/75 to-transparent",
       )}
     >
-      <div className="mx-auto flex h-14 max-w-[1920px] items-center justify-between gap-3 px-4 sm:h-16 sm:px-6 md:px-10 lg:px-14">
-        <div className="flex min-w-0 items-center gap-6 md:gap-8">
-          <Link href="/" className="min-w-0 shrink-0">
+      <div className="mx-auto flex h-14 max-w-[1920px] items-center justify-between gap-2 px-3 sm:h-16 sm:gap-3 sm:px-6 md:px-10 lg:px-14">
+        <div className="flex min-w-0 items-center gap-4 md:gap-8">
+          <Link href="/" className="min-w-0 shrink-0" aria-label="DiMovie home">
             <DiMovieLogo
+              className="gap-1.5 sm:gap-2"
               markClassName="size-7 sm:size-8"
-              wordmarkClassName="text-xl sm:text-2xl"
+              wordmarkClassName="hidden text-xl sm:inline sm:text-2xl"
             />
           </Link>
           {user && (
@@ -80,7 +81,7 @@ export function Navbar() {
           )}
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2 md:gap-3">
           <RoomCodeSearch className="hidden md:flex" />
           <RoomCodeSearch compact className="md:hidden" />
           {user ? (
@@ -129,10 +130,13 @@ export function Navbar() {
               </DropdownMenu>
             </>
           ) : (
-            <div className="flex items-center gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-0.5 sm:gap-2">
               <Link
                 href="/login"
-                className={buttonVariants({ variant: "ghost", size: "sm" })}
+                className={cn(
+                  buttonVariants({ variant: "ghost", size: "sm" }),
+                  "h-8 px-2 text-xs sm:px-3 sm:text-sm",
+                )}
               >
                 Sign In
               </Link>
@@ -140,10 +144,11 @@ export function Navbar() {
                 href="/register"
                 className={cn(
                   buttonVariants({ size: "sm" }),
-                  "bg-[#e50914] hover:bg-[#f40612]",
+                  "h-8 bg-[#e50914] px-2.5 text-xs hover:bg-[#f40612] sm:px-3 sm:text-sm",
                 )}
               >
-                Get Started
+                <span className="sm:hidden">Start</span>
+                <span className="hidden sm:inline">Get Started</span>
               </Link>
             </div>
           )}

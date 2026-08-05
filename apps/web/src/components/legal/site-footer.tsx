@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LEGAL_META } from "@/lib/legal/meta";
+import { DiMovieLogo } from "@/components/brand/dimovie-logo";
 
 const FOOTER_LINKS = [
   { href: "/privacy", label: "Privacy Policy" },
@@ -18,11 +19,11 @@ export function SiteFooter() {
     <footer className="relative z-[1] border-t border-white/6 bg-[#06060a]/90">
       <div className="mx-auto flex max-w-[1920px] flex-col gap-6 px-4 py-10 sm:px-6 md:flex-row md:items-end md:justify-between md:px-10 lg:px-14">
         <div className="max-w-sm">
-          <Link
-            href="/"
-            className="font-display text-xl font-bold tracking-[-0.04em] text-[#e50914]"
-          >
-            {LEGAL_META.productName}
+          <Link href="/" aria-label={LEGAL_META.productName}>
+            <DiMovieLogo
+              markClassName="size-7"
+              wordmarkClassName="text-xl"
+            />
           </Link>
           <p className="mt-2 text-sm leading-relaxed text-white/40">
             Synchronized watch parties with voice and chat — built for the night
