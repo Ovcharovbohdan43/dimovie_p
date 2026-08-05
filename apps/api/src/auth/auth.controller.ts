@@ -61,6 +61,20 @@ export class AuthController {
     return this.authService.logout(req.cookies?.refreshToken, res);
   }
 
+  /**
+   * Re-issue access + refresh cookie for the current Bearer user.
+   * Call via same-origin `/backend` after OAuth so the httpOnly cookie
+   * lands on the frontend host (not the API host).
+   */
+  @Post('persist')
+  @UseGuards(JwtAuthGuard)
+  persist(
+    @Req() req: Request & { user: AuthUser },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return this.authService.persistSession(req.user, res);
+  }
+
   @Get('me')
   @UseGuards(JwtAuthGuard)
   me(@Req() req: Request & { user: AuthUser }) {
@@ -78,7 +92,7 @@ export class AuthController {
     @Res() res: Response,
   ) {
     const tokens = this.authService.issueOAuthTokens(req.user, res);
-    const frontend = this.config.get('CORS_ORIGIN', 'http://localhost:3000');
+    const frontend = this.frontendUrl();
     tokens.then((t) => {
       res.redirect(`${frontend}/auth/callback?token=${t.accessToken}`);
     });
@@ -95,9 +109,16 @@ export class AuthController {
     @Res() res: Response,
   ) {
     const tokens = this.authService.issueOAuthTokens(req.user, res);
-    const frontend = this.config.get('CORS_ORIGIN', 'http://localhost:3000');
+    const frontend = this.frontendUrl();
     tokens.then((t) => {
       res.redirect(`${frontend}/auth/callback?token=${t.accessToken}`);
     });
+  }
+
+  private frontendUrl() {
+    const explicit = this.config.get<string>('FRONTEND_URL')?.trim();
+    if (explicit) return explicit.replace(/\/+$/, '');
+    const cors = this.config.get<string>('CORS_ORIGIN', 'http://localhost:3000');
+    return cors.split(',')[0]?.trim().replace(/\/+$/, '') || 'http://localhost:3000';
   }
 }

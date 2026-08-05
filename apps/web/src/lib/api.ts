@@ -60,13 +60,15 @@ type FetchApiOptions = RequestInit & {
    * Used for `/api/catalog/*` long proxies and runtime config.
    */
   sameOrigin?: boolean;
+  /** Skip silent refresh (used by refresh itself). */
+  skipAuthRefresh?: boolean;
 };
 
 async function fetchApi(
   path: string,
   options: FetchApiOptions = {},
 ): Promise<Response> {
-  const { direct, sameOrigin, ...init } = options;
+  const { direct, sameOrigin, skipAuthRefresh: _skip, ...init } = options;
   const useSameOrigin = sameOrigin || path.startsWith("/api/");
   const url = useSameOrigin
     ? path
@@ -129,23 +131,109 @@ function throwApiError(
   );
 }
 
+/** Single-flight refresh so parallel 401s share one cookie round-trip. */
+let refreshInFlight: Promise<string | null> | null = null;
+
+export async function refreshAccessToken(): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetchApi("/auth/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        skipAuthRefresh: true,
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { accessToken?: string };
+      if (!data.accessToken) return null;
+      setToken(data.accessToken);
+      return data.accessToken;
+    } catch {
+      return null;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
+}
+
+/**
+ * Ensure a refresh cookie is bound to the current site origin (via `/backend`).
+ * Call after OAuth callback and once on app boot when a Bearer token exists.
+ */
+export async function persistSession(): Promise<boolean> {
+  const token = getToken();
+  if (!token) return false;
+  try {
+    const res = await fetchApi("/auth/persist", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      skipAuthRefresh: true,
+    });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { accessToken?: string };
+    if (data.accessToken) setToken(data.accessToken);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function shouldAttemptRefresh(path: string, status: number) {
+  if (status !== 401) return false;
+  if (
+    path.startsWith("/auth/login") ||
+    path.startsWith("/auth/register") ||
+    path.startsWith("/auth/refresh") ||
+    path.startsWith("/auth/persist") ||
+    path.startsWith("/auth/logout")
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export async function api<T>(
   path: string,
   options: FetchApiOptions = {},
 ): Promise<T> {
-  const token = getToken();
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-    ...(options.headers ?? {}),
+  const buildHeaders = (token: string | null): HeadersInit => {
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+      ...(options.headers ?? {}),
+    };
+    if (token) {
+      (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+    }
+    return headers;
   };
-  if (token) {
-    (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
-  }
 
-  const res = await fetchApi(path, {
+  let token = getToken();
+  let res = await fetchApi(path, {
     ...options,
-    headers,
+    headers: buildHeaders(token),
   });
+
+  if (
+    !res.ok &&
+    !options.skipAuthRefresh &&
+    shouldAttemptRefresh(path, res.status)
+  ) {
+    const next = await refreshAccessToken();
+    if (next) {
+      token = next;
+      res = await fetchApi(path, {
+        ...options,
+        headers: buildHeaders(token),
+      });
+    }
+  }
 
   if (!res.ok) {
     throwApiError(res, await readErrorPayload(res));

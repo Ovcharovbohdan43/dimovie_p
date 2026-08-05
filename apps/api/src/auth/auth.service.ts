@@ -158,8 +158,25 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    await this.prisma.refreshToken.delete({ where: { id: stored.id } });
-    return this.issueTokens(stored.user, res);
+    // Rotate: issue first, then drop the used refresh token.
+    const tokens = await this.issueTokens(stored.user, res);
+    await this.prisma.refreshToken.deleteMany({
+      where: { id: stored.id },
+    });
+    return tokens;
+  }
+
+  /**
+   * Bind a refresh cookie to the browser origin that called us (usually the
+   * Next `/backend` proxy). Needed after OAuth, where the API host cookie
+   * would otherwise be invisible to the frontend.
+   */
+  async persistSession(user: AuthUser, res: Response): Promise<AuthResponse> {
+    const dbUser = await this.prisma.user.findUnique({ where: { id: user.id } });
+    if (!dbUser) {
+      throw new UnauthorizedException('Invalid user');
+    }
+    return this.issueTokens(dbUser, res);
   }
 
   async logout(refreshToken: string | undefined, res: Response) {
@@ -181,9 +198,11 @@ export class AuthService {
     user: { id: string; email: string; displayName: string },
     res: Response,
   ): Promise<AuthResponse> {
-    const accessTtl = this.config.get<string>('JWT_ACCESS_TTL', '15m');
+    // Longer access window + cookie refresh keeps users signed in across reloads.
+    const accessTtl = this.config.get<string>('JWT_ACCESS_TTL', '2h');
     const refreshDays = parseInt(
-      this.config.get<string>('JWT_REFRESH_TTL', '30d').replace('d', ''),
+      this.config.get<string>('JWT_REFRESH_TTL', '30d').replace(/\D/g, '') ||
+        '30',
       10,
     );
 
@@ -198,7 +217,7 @@ export class AuthService {
     const refreshToken = randomBytes(48).toString('hex');
     const tokenHash = this.hashToken(refreshToken);
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + refreshDays);
+    expiresAt.setDate(expiresAt.getDate() + Math.max(1, refreshDays));
 
     await this.prisma.refreshToken.create({
       data: { userId: user.id, tokenHash, expiresAt },
@@ -214,15 +233,30 @@ export class AuthService {
   }
 
   private refreshCookieOptions(expiresAt?: Date) {
-    const domain = this.config.get<string>('COOKIE_DOMAIN');
+    const domain = this.config.get<string>('COOKIE_DOMAIN')?.trim();
     const isProd = this.config.get('NODE_ENV') === 'production';
-    // path '/' so cookie works both on direct API and via Next `/backend` rewrite
+    const sameSiteRaw = (
+      this.config.get<string>('COOKIE_SAMESITE') ?? 'lax'
+    ).toLowerCase();
+    const sameSite =
+      sameSiteRaw === 'none' ||
+      sameSiteRaw === 'strict' ||
+      sameSiteRaw === 'lax'
+        ? sameSiteRaw
+        : 'lax';
+    const maxAgeSec = expiresAt
+      ? Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000))
+      : undefined;
+
+    // path '/' so the cookie works via Next `/backend` rewrite on the site host.
+    // Leave COOKIE_DOMAIN empty in production when using the rewrite proxy.
     return {
       httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax' as const,
+      secure: isProd || sameSite === 'none',
+      sameSite: sameSite as 'lax' | 'strict' | 'none',
       path: '/',
       ...(expiresAt ? { expires: expiresAt } : {}),
+      ...(maxAgeSec != null ? { maxAge: maxAgeSec } : {}),
       ...(domain ? { domain } : {}),
     };
   }
@@ -255,7 +289,7 @@ export class AuthService {
 
   private parseTtlSeconds(ttl: string): number {
     const match = ttl.match(/^(\d+)([smhd])$/);
-    if (!match) return 900;
+    if (!match) return 7200;
     const value = parseInt(match[1], 10);
     const unit = match[2];
     const multipliers: Record<string, number> = {
