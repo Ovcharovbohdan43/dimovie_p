@@ -25,7 +25,10 @@ export function loadRezkaProxyConfig(): RezkaProxyConfig | null {
   if (fromUrl) {
     try {
       const parsed = new URL(fromUrl);
-      const server = `${parsed.protocol}//${parsed.host}`;
+      const port =
+        parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+      // Keep explicit port — Playwright/undici are picky about omitted :80.
+      const server = `${parsed.protocol}//${parsed.hostname}:${port}`;
       const username = decodeURIComponent(parsed.username || '');
       const password = decodeURIComponent(parsed.password || '');
       return {
@@ -40,11 +43,23 @@ export function loadRezkaProxyConfig(): RezkaProxyConfig | null {
 
   const server = process.env.REZKA_PROXY_SERVER?.trim();
   if (!server) return null;
-  return {
-    server: server.includes('://') ? server : `http://${server}`,
-    username: process.env.REZKA_PROXY_USERNAME?.trim() || undefined,
-    password: process.env.REZKA_PROXY_PASSWORD?.trim() || undefined,
-  };
+  const withProto = server.includes('://') ? server : `http://${server}`;
+  try {
+    const parsed = new URL(withProto);
+    const port =
+      parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+    return {
+      server: `${parsed.protocol}//${parsed.hostname}:${port}`,
+      username: process.env.REZKA_PROXY_USERNAME?.trim() || undefined,
+      password: process.env.REZKA_PROXY_PASSWORD?.trim() || undefined,
+    };
+  } catch {
+    return {
+      server: withProto,
+      username: process.env.REZKA_PROXY_USERNAME?.trim() || undefined,
+      password: process.env.REZKA_PROXY_PASSWORD?.trim() || undefined,
+    };
+  }
 }
 
 /** Append -rotate (or keep sticky session id) for Webshare backbone usernames. */
@@ -67,6 +82,8 @@ export class RezkaProxyPool {
   private readonly rotate: boolean;
   private agent: ProxyAgent | null = null;
   private agentKey = '';
+  /** After tunnel failures, skip proxy until process restart (direct Anubis still works). */
+  private bypass = false;
 
   constructor(config: RezkaProxyConfig | null = loadRezkaProxyConfig()) {
     this.base = config;
@@ -81,14 +98,24 @@ export class RezkaProxyPool {
   }
 
   get enabled(): boolean {
-    return !!this.base;
+    return !!this.base && !this.bypass;
   }
 
-  /** Playwright / Chromium proxy option. */
+  markBroken(reason: string): void {
+    if (!this.base || this.bypass) return;
+    this.bypass = true;
+    logger.warn(
+      `Rezka proxy disabled for this process (${reason}); falling back to direct`,
+    );
+    void this.agent?.close().catch(() => undefined);
+    this.agent = null;
+  }
+
+  /** Playwright / Chromium proxy option (undefined when bypassed). */
   playwrightProxy():
     | { server: string; username?: string; password?: string }
     | undefined {
-    if (!this.base) return undefined;
+    if (!this.enabled || !this.base) return undefined;
     return {
       server: this.base.server,
       username: withRotatedUsername(this.base.username, this.rotate),
@@ -97,7 +124,7 @@ export class RezkaProxyPool {
   }
 
   private getAgent(): ProxyAgent | undefined {
-    if (!this.base) return undefined;
+    if (!this.enabled || !this.base) return undefined;
     const username = withRotatedUsername(this.base.username, this.rotate);
     const key = `${this.base.server}|${username ?? ''}|${this.base.password ?? ''}`;
     if (!this.agent || this.agentKey !== key) {
@@ -120,6 +147,12 @@ export class RezkaProxyPool {
     if (!dispatcher) {
       return undiciFetch(url, init);
     }
-    return undiciFetch(url, { ...init, dispatcher });
+    try {
+      return await undiciFetch(url, { ...init, dispatcher });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.markBroken(message);
+      return undiciFetch(url, init);
+    }
   }
 }

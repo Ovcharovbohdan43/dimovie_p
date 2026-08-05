@@ -405,7 +405,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
   private async getBrowser(): Promise<Browser> {
     if (this.browser?.isConnected()) return this.browser;
     if (!this.browserInit) {
-      const proxy = this.proxy.playwrightProxy();
+      // Proxy is applied per-context so we can fall back to direct on tunnel errors.
       this.browserInit = chromium
         .launch({
           headless: true,
@@ -414,7 +414,6 @@ export class RezkaCatalogService implements OnModuleDestroy {
           handleSIGINT: false,
           handleSIGTERM: false,
           handleSIGHUP: false,
-          ...(proxy ? { proxy } : {}),
         })
         .then((browser) => {
           this.browser = browser;
@@ -423,9 +422,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
             this.browser = null;
             this.browserInit = null;
           });
-          this.logger.log(
-            `Playwright Chromium ready${proxy ? ' (via proxy)' : ''}`,
-          );
+          this.logger.log('Playwright Chromium ready');
           return browser;
         })
         .catch((err) => {
@@ -629,18 +626,29 @@ export class RezkaCatalogService implements OnModuleDestroy {
     fn: (ctx: CatalogRequestContext) => Promise<T>,
   ): Promise<T> {
     let lastError: unknown;
+    // 1) proxy (if configured), 2) direct after tunnel/proxy failure, 3) browser relaunch
+    const modes: Array<'proxy' | 'direct'> = this.proxy.enabled
+      ? ['proxy', 'direct']
+      : ['direct'];
 
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= modes.length + 1; attempt++) {
       let context: BrowserContext | null = null;
+      const mode = modes[Math.min(attempt - 1, modes.length - 1)]!;
       try {
         if (attempt > 1) {
           this.logger.warn(
-            `Retrying Playwright catalog load (attempt ${attempt})`,
+            `Retrying Playwright catalog load (attempt ${attempt}, ${mode})`,
           );
-          await this.resetBrowser();
+          if (mode === 'direct') {
+            // keep browser; only drop proxy on context
+          } else {
+            await this.resetBrowser();
+          }
         }
 
         const browser = await this.getBrowser();
+        const proxyOpt =
+          mode === 'proxy' ? this.proxy.playwrightProxy() : undefined;
         context = await browser.newContext({
           userAgent: USER_AGENT,
           locale: 'ru-RU',
@@ -649,6 +657,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
             'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
             'Accept-Encoding': 'gzip, deflate, br',
           },
+          ...(proxyOpt ? { proxy: proxyOpt } : {}),
         });
 
         const seeded = this.getOriginCookies(origin);
@@ -809,15 +818,25 @@ export class RezkaCatalogService implements OnModuleDestroy {
         ) {
           throw err;
         }
-        if (isBrowserClosedError(err) && attempt < 2) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (/ERR_TUNNEL_CONNECTION_FAILED|proxy|tunnel/i.test(message)) {
+          this.proxy.markBroken(message);
+        }
+        if (
+          (isBrowserClosedError(err) ||
+            /ERR_TUNNEL_CONNECTION_FAILED|tunnel/i.test(message)) &&
+          attempt < modes.length + 1
+        ) {
           this.logger.warn(
-            `Playwright crashed mid-request, will relaunch: ${err instanceof Error ? err.message : err}`,
+            `Playwright catalog retryable failure: ${message}`,
           );
-          await this.resetBrowser();
+          if (isBrowserClosedError(err)) {
+            await this.resetBrowser();
+          }
           continue;
         }
         this.logger.error(
-          `Catalog fetch failed for ${catalogUrl}: ${err instanceof Error ? err.message : err}`,
+          `Catalog fetch failed for ${catalogUrl}: ${message}`,
         );
         throw new ServiceUnavailableException(
           'Could not load this catalog page right now. Check the link and try again in a moment.',
