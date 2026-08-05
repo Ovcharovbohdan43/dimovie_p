@@ -172,7 +172,7 @@ export function RoomCatalogSetup({ roomId, onSuccess }: RoomCatalogSetupProps) {
 
         {parseCatalog.isPending && (
           <p className="text-xs text-white/40">
-            Opening the page can take 10–15 seconds — please wait
+            First load can take up to a minute (bot check + page parse) — keep this tab open
           </p>
         )}
 

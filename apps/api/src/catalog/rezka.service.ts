@@ -25,7 +25,7 @@ import {
 
 const TRASH = ['@', '#', '!', '^', '$'];
 const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 function product(iterables: string[], repeat: number): string[][] {
   const copies: string[][] = [];
@@ -123,8 +123,13 @@ function pickBestQuality(qualities: Record<string, string>): {
 }
 
 function isBotChallengeHtml(html: string): boolean {
+  const lower = html.toLowerCase();
   return (
-    html.includes('anubis_challenge') ||
+    lower.includes('anubis_challenge') ||
+    lower.includes('techaro.lol') ||
+    html.includes('не бот') ||
+    html.includes('Проверяем, что вы не бот') ||
+    // Legacy mojibake of «не бот» seen in some Railway log encodings
     html.includes('╨╜╨╡ ╨▒╨╛╤é') ||
     (html.length < 8000 && !html.includes('user-favorites-holder'))
   );
@@ -134,6 +139,25 @@ function looksLikeCatalogHtml(html: string): boolean {
   return (
     html.includes('user-favorites-holder') || html.includes('b-post__title')
   );
+}
+
+/** Movies often omit #translators-list and only embed sof.tv.initCDNMoviesEvents(postId, translatorId, …). */
+function parseTranslatorIdsFromScripts(html: string): CatalogTranslation[] {
+  const items: CatalogTranslation[] = [];
+  const seen = new Set<string>();
+  const patterns = [
+    /initCDNMoviesEvents\s*\(\s*['"]?\d+['"]?\s*,\s*['"]?(\d+)['"]?/gi,
+    /initCDNSeriesEvents\s*\(\s*['"]?\d+['"]?\s*,\s*['"]?(\d+)['"]?/gi,
+  ];
+  for (const pattern of patterns) {
+    for (const match of html.matchAll(pattern)) {
+      const id = match[1];
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      items.push({ id, title: 'Default' });
+    }
+  }
+  return items;
 }
 
 function isBrowserClosedError(err: unknown): boolean {
@@ -174,9 +198,49 @@ export class RezkaCatalogService implements OnModuleDestroy {
   private chain: Promise<unknown> = Promise.resolve();
   /** Cookies + postId from a recent parse so stream can skip Chromium. */
   private readonly sessions = new Map<string, CatalogSession>();
+  /** Origin-scoped jar (Anubis JWT etc.) reused across light fetches. */
+  private readonly originCookies = new Map<
+    string,
+    { header: string; expiresAt: number }
+  >();
 
   async onModuleDestroy() {
     await this.resetBrowser();
+  }
+
+  private rememberOriginCookies(origin: string, cookieHeader: string): void {
+    const trimmed = cookieHeader.trim();
+    if (!trimmed) return;
+    const prev = this.originCookies.get(origin)?.header ?? '';
+    const merged = this.mergeCookieHeaders(prev, trimmed);
+    this.originCookies.set(origin, {
+      header: merged,
+      expiresAt: Date.now() + SESSION_TTL_MS,
+    });
+  }
+
+  private getOriginCookies(origin: string): string {
+    const cached = this.originCookies.get(origin);
+    if (!cached) return '';
+    if (cached.expiresAt < Date.now()) {
+      this.originCookies.delete(origin);
+      return '';
+    }
+    return cached.header;
+  }
+
+  private mergeCookieHeaders(...headers: string[]): string {
+    const map = new Map<string, string>();
+    for (const header of headers) {
+      for (const part of header.split(';')) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+        const eq = trimmed.indexOf('=');
+        if (eq <= 0) continue;
+        map.set(trimmed.slice(0, eq), trimmed.slice(eq + 1));
+      }
+    }
+    return [...map.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
   }
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
@@ -361,12 +425,16 @@ export class RezkaCatalogService implements OnModuleDestroy {
     catalogUrl: string,
   ): Promise<{ html: string; cookieHeader: string } | null> {
     try {
+      const origin = new URL(catalogUrl).origin;
+      const knownCookies = this.getOriginCookies(origin);
       const response = await fetch(catalogUrl, {
         headers: {
           'User-Agent': USER_AGENT,
           Accept:
             'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Accept-Encoding': 'gzip, deflate, br',
+          ...(knownCookies ? { Cookie: knownCookies } : {}),
         },
         redirect: 'follow',
         signal: AbortSignal.timeout(25000),
@@ -382,7 +450,10 @@ export class RezkaCatalogService implements OnModuleDestroy {
         typeof response.headers.getSetCookie === 'function'
           ? response.headers.getSetCookie()
           : [];
-      const cookieHeader = this.cookieHeaderFromSetCookie(cookies);
+      const cookieHeader = this.mergeCookieHeaders(
+        knownCookies,
+        this.cookieHeaderFromSetCookie(cookies),
+      );
       const html = await response.text();
       if (isBotChallengeHtml(html) || !looksLikeCatalogHtml(html)) {
         this.logger.log(
@@ -391,6 +462,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
         return null;
       }
 
+      this.rememberOriginCookies(origin, cookieHeader);
       this.logger.log(`Light catalog fetch ok for ${catalogUrl}`);
       return { html, cookieHeader };
     } catch (err) {
@@ -404,12 +476,16 @@ export class RezkaCatalogService implements OnModuleDestroy {
   /** Warm cookies even when the HTML is a bot challenge (ajax may still work). */
   private async fetchCookiesLight(catalogUrl: string): Promise<string> {
     try {
+      const origin = new URL(catalogUrl).origin;
+      const knownCookies = this.getOriginCookies(origin);
       const response = await fetch(catalogUrl, {
         headers: {
           'User-Agent': USER_AGENT,
           Accept:
             'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Accept-Encoding': 'gzip, deflate, br',
+          ...(knownCookies ? { Cookie: knownCookies } : {}),
         },
         redirect: 'follow',
         signal: AbortSignal.timeout(20000),
@@ -418,9 +494,14 @@ export class RezkaCatalogService implements OnModuleDestroy {
         typeof response.headers.getSetCookie === 'function'
           ? response.headers.getSetCookie()
           : [];
-      return this.cookieHeaderFromSetCookie(cookies);
+      const cookieHeader = this.mergeCookieHeaders(
+        knownCookies,
+        this.cookieHeaderFromSetCookie(cookies),
+      );
+      this.rememberOriginCookies(origin, cookieHeader);
+      return cookieHeader;
     } catch {
-      return '';
+      return this.getOriginCookies(new URL(catalogUrl).origin);
     }
   }
 
@@ -446,23 +527,67 @@ export class RezkaCatalogService implements OnModuleDestroy {
           userAgent: USER_AGENT,
           locale: 'ru-RU',
           viewport: { width: 1024, height: 720 },
+          extraHTTPHeaders: {
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br',
+          },
         });
+
+        const seeded = this.getOriginCookies(origin);
+        if (seeded) {
+          const cookieList = seeded
+            .split(';')
+            .map((part) => part.trim())
+            .filter(Boolean)
+            .map((part) => {
+              const eq = part.indexOf('=');
+              return {
+                name: part.slice(0, eq),
+                value: part.slice(eq + 1),
+                domain: new URL(origin).hostname,
+                path: '/',
+              };
+            })
+            .filter((c) => c.name);
+          if (cookieList.length) {
+            await context.addCookies(cookieList);
+          }
+        }
 
         const page = await context.newPage();
         try {
           await page.goto(catalogUrl, {
             waitUntil: 'domcontentloaded',
-            timeout: 45000,
+            timeout: 60000,
           });
 
+          // Anubis PoW can take well over 30s on small Railway CPUs.
           try {
-            await page.waitForSelector(
-              '#user-favorites-holder, .b-post__title',
-              {
-                state: 'attached',
-                timeout: 30000,
-              },
+            const challengeHtml = await page.content();
+            if (isBotChallengeHtml(challengeHtml)) {
+              this.logger.log(
+                `Anubis challenge detected, waiting for catalog HTML…`,
+              );
+            }
+            await page.waitForFunction(
+              () =>
+                !!document.getElementById('user-favorites-holder') ||
+                !!document.querySelector('.b-post__title'),
+              { timeout: 90000 },
             );
+            // Translators / player scripts often hydrate after the title shell.
+            await page
+              .waitForFunction(
+                () =>
+                  !!document.querySelector(
+                    '#translators-list a[data-translator_id]',
+                  ) ||
+                  /initCDN(?:Movies|Series)Events\s*\(/.test(
+                    document.documentElement.innerHTML,
+                  ),
+                { timeout: 15000 },
+              )
+              .catch(() => undefined);
           } catch {
             const html = await page.content();
             if (isBotChallengeHtml(html)) {
@@ -478,6 +603,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
           const cookieHeader = cookies
             .map((c) => `${c.name}=${c.value}`)
             .join('; ');
+          this.rememberOriginCookies(origin, cookieHeader);
           const requestContext = context;
           return await fn({
             html,
@@ -631,8 +757,12 @@ export class RezkaCatalogService implements OnModuleDestroy {
           title: parsed.title,
           cookieHeader,
         });
+        this.rememberOriginCookies(origin, cookieHeader);
         return Promise.resolve(parsed);
       },
+    );
+    this.logger.log(
+      `parseCatalog ok kind=${info.kind} postId=${info.postId} translations=${info.translations.length}`,
     );
     // Free Chromium RAM so the following stream resolve can stay on fetch/ajax.
     void this.resetBrowser();
@@ -660,12 +790,20 @@ export class RezkaCatalogService implements OnModuleDestroy {
     const thumbnail =
       root.querySelector('.b-sidecover img')?.getAttribute('src') || undefined;
 
-    const translations = this.parseTranslations(root);
+    const translations = this.parseTranslations(root, html);
     if (!translations.length) {
       throw new NotFoundException('No voice tracks found on this page');
     }
 
-    let kind: 'movie' | 'series' = 'movie';
+    // URL path is a strong signal for movies vs series when season tabs are absent
+    // (films never have #simple-seasons-tabs; cartoons/shows may vary).
+    const pathKind = /\/(series|shows)\//i.test(new URL(catalogUrl).pathname)
+      ? 'series'
+      : /\/(films|cartoons|animation)\//i.test(new URL(catalogUrl).pathname)
+        ? 'movie'
+        : null;
+
+    let kind: 'movie' | 'series' = pathKind ?? 'movie';
     let seasons: CatalogSeason[] | undefined;
     let episodesBySeason: Record<string, CatalogEpisode[]> | undefined;
 
@@ -740,21 +878,50 @@ export class RezkaCatalogService implements OnModuleDestroy {
     });
   }
 
-  private parseTranslations(root: ReturnType<typeof parseHtml>): CatalogTranslation[] {
-    const list = root.getElementById('translators-list');
-    if (!list) return [];
-
+  private parseTranslations(
+    root: ReturnType<typeof parseHtml>,
+    html: string,
+  ): CatalogTranslation[] {
     const seen = new Set<string>();
     const items: CatalogTranslation[] = [];
 
-    for (const anchor of list.querySelectorAll('a[data-translator_id]')) {
-      const id = anchor.getAttribute('data-translator_id') ?? '';
-      if (!id || seen.has(id)) continue;
+    const push = (id: string, title: string) => {
+      if (!id || seen.has(id)) return;
       seen.add(id);
-      items.push({
-        id,
-        title: anchor.getAttribute('title') ?? anchor.text.trim(),
-      });
+      items.push({ id, title: title.trim() || `Track ${id}` });
+    };
+
+    const list = root.getElementById('translators-list');
+    if (list) {
+      for (const anchor of list.querySelectorAll('a[data-translator_id]')) {
+        push(
+          anchor.getAttribute('data-translator_id') ?? '',
+          anchor.getAttribute('title') ?? anchor.text.trim(),
+        );
+      }
+      // Some skins put data-translator_id on the <li>, not the <a>.
+      for (const li of list.querySelectorAll('[data-translator_id]')) {
+        push(
+          li.getAttribute('data-translator_id') ?? '',
+          li.getAttribute('title') ?? li.text.trim(),
+        );
+      }
+    }
+
+    // Films with a single voice often skip the translator UI entirely.
+    if (!items.length) {
+      for (const item of parseTranslatorIdsFromScripts(html)) {
+        push(item.id, item.title);
+      }
+    }
+
+    if (!items.length) {
+      for (const el of root.querySelectorAll('[data-translator_id]')) {
+        push(
+          el.getAttribute('data-translator_id') ?? '',
+          el.getAttribute('title') ?? el.text.trim(),
+        );
+      }
     }
 
     return items;

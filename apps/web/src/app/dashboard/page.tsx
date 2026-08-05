@@ -32,7 +32,7 @@ function DashboardContent() {
   const qc = useQueryClient();
   const { me } = useAuth();
   const reduceMotion = useReducedMotion();
-  const [open, setOpen] = useState(params.get("create") === "true");
+  const [open, setOpen] = useState(false);
   const [privacy, setPrivacy] = useState<"PUBLIC" | "PRIVATE" | "PASSWORD">("PUBLIC");
   const [password, setPassword] = useState("");
   const [description, setDescription] = useState("");
@@ -41,6 +41,13 @@ function DashboardContent() {
   useEffect(() => {
     if (me.isError) router.push("/login");
   }, [me.isError, router]);
+
+  // Soft-nav from header "Start party" keeps this page mounted — sync dialog to ?create=
+  useEffect(() => {
+    if (params.get("create") !== "true") return;
+    setOpen(true);
+    router.replace("/dashboard", { scroll: false });
+  }, [params, router]);
 
   const rooms = useQuery({
     queryKey: ["rooms", "mine"],
