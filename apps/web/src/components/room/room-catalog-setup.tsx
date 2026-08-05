@@ -212,7 +212,7 @@ export function RoomCatalogSetup({ roomId, onSuccess }: RoomCatalogSetupProps) {
               </select>
             </div>
 
-            {catalog.kind === "series" && catalog.seasons && (
+            {catalog.kind === "series" && !!catalog.seasons?.length && (
               <>
                 <div>
                   <Label className="text-xs text-white/50">Season</Label>

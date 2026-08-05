@@ -29,6 +29,7 @@ import {
   readJsonScript,
   solveAnubisPow,
 } from './anubis';
+import { RezkaProxyPool } from './rezka-proxy';
 
 const TRASH = ['@', '#', '!', '^', '$'];
 const USER_AGENT =
@@ -197,6 +198,7 @@ const SESSION_TTL_MS = 15 * 60 * 1000;
 @Injectable()
 export class RezkaCatalogService implements OnModuleDestroy {
   private readonly logger = new Logger(RezkaCatalogService.name);
+  private readonly proxy = new RezkaProxyPool();
   private browser: Browser | null = null;
   private browserInit: Promise<Browser> | null = null;
   /** Serialize heavy catalog work — concurrent Chromium contexts OOM small boxes. */
@@ -208,6 +210,10 @@ export class RezkaCatalogService implements OnModuleDestroy {
     string,
     { header: string; expiresAt: number }
   >();
+
+  private outboundFetch(url: string, init?: RequestInit) {
+    return this.proxy.fetch(url, init as import('undici').RequestInit);
+  }
 
   async onModuleDestroy() {
     await this.resetBrowser();
@@ -298,7 +304,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
     referer: string,
     cookieHeader: string,
   ): Promise<unknown> {
-    const response = await fetch(`${origin}${path}`, {
+    const response = await this.outboundFetch(`${origin}${path}`, {
       method: 'POST',
       headers: {
         'User-Agent': USER_AGENT,
@@ -399,6 +405,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
   private async getBrowser(): Promise<Browser> {
     if (this.browser?.isConnected()) return this.browser;
     if (!this.browserInit) {
+      const proxy = this.proxy.playwrightProxy();
       this.browserInit = chromium
         .launch({
           headless: true,
@@ -407,6 +414,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
           handleSIGINT: false,
           handleSIGTERM: false,
           handleSIGHUP: false,
+          ...(proxy ? { proxy } : {}),
         })
         .then((browser) => {
           this.browser = browser;
@@ -415,7 +423,9 @@ export class RezkaCatalogService implements OnModuleDestroy {
             this.browser = null;
             this.browserInit = null;
           });
-          this.logger.log('Playwright Chromium ready');
+          this.logger.log(
+            `Playwright Chromium ready${proxy ? ' (via proxy)' : ''}`,
+          );
           return browser;
         })
         .catch((err) => {
@@ -472,7 +482,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
       solution,
     );
 
-    const passResponse = await fetch(passUrl, {
+    const passResponse = await this.outboundFetch(passUrl, {
       headers: this.htmlRequestHeaders(seedCookies),
       redirect: 'manual',
       signal: AbortSignal.timeout(20000),
@@ -515,7 +525,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
       const origin = new URL(catalogUrl).origin;
       let cookieHeader = this.getOriginCookies(origin);
 
-      const response = await fetch(catalogUrl, {
+      const response = await this.outboundFetch(catalogUrl, {
         headers: this.htmlRequestHeaders(cookieHeader),
         redirect: 'follow',
         signal: AbortSignal.timeout(25000),
@@ -560,7 +570,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
         }
 
         cookieHeader = authed;
-        const retry = await fetch(catalogUrl, {
+        const retry = await this.outboundFetch(catalogUrl, {
           headers: this.htmlRequestHeaders(cookieHeader),
           redirect: 'follow',
           signal: AbortSignal.timeout(25000),
@@ -919,8 +929,15 @@ export class RezkaCatalogService implements OnModuleDestroy {
         return Promise.resolve(parsed);
       },
     );
+    const seasonCount = info.seasons?.length ?? 0;
+    const episodeCount = info.episodesBySeason
+      ? Object.values(info.episodesBySeason).reduce(
+          (n, eps) => n + eps.length,
+          0,
+        )
+      : 0;
     this.logger.log(
-      `parseCatalog ok kind=${info.kind} postId=${info.postId} translations=${info.translations.length}`,
+      `parseCatalog ok kind=${info.kind} postId=${info.postId} translations=${info.translations.length} seasons=${seasonCount} episodes=${episodeCount}`,
     );
     // Free Chromium RAM so the following stream resolve can stay on fetch/ajax.
     void this.resetBrowser();
@@ -962,42 +979,19 @@ export class RezkaCatalogService implements OnModuleDestroy {
         : null;
 
     let kind: 'movie' | 'series' = pathKind ?? 'movie';
-    let seasons: CatalogSeason[] | undefined;
-    let episodesBySeason: Record<string, CatalogEpisode[]> | undefined;
-
-    const seasonsRoot = root.getElementById('simple-seasons-tabs');
-    if (seasonsRoot) {
+    const schedule = this.parseSeasonsAndEpisodes(root, html);
+    if (schedule.seasons.length) {
       kind = 'series';
-      seasons = seasonsRoot.querySelectorAll('a[data-tab_id]').map((a) => {
-        const id = a.getAttribute('data-tab_id') ?? '';
-        const titleText = a.text.trim();
-        const numMatch = titleText.match(/(\d+)/);
-        return {
-          id,
-          title: titleText,
-          number: numMatch ? Number.parseInt(numMatch[1]!, 10) : 0,
-        };
-      });
+    }
+    const seasons = schedule.seasons.length ? schedule.seasons : undefined;
+    const episodesBySeason = schedule.seasons.length
+      ? schedule.episodesBySeason
+      : undefined;
 
-      episodesBySeason = {};
-      for (const season of seasons) {
-        const list = root.getElementById(`simple-episodes-list-${season.id}`);
-        if (!list) continue;
-        episodesBySeason[season.id] = list
-          .querySelectorAll('a[data-episode_id]')
-          .map((a) => {
-            const episodeId = a.getAttribute('data-episode_id') ?? '';
-            const id = a.getAttribute('data-id') ?? '';
-            const titleText = a.text.trim();
-            const numMatch = titleText.match(/(\d+)/);
-            return {
-              id,
-              episodeId,
-              title: titleText,
-              number: numMatch ? Number.parseInt(numMatch[1]!, 10) : 0,
-            };
-          });
-      }
+    if (kind === 'series' && !seasons?.length) {
+      this.logger.warn(
+        `Series page missing season/episode tabs postId=${postId}`,
+      );
     }
 
     const fromUrl = parseEpisodeFromRezkaUrl(catalogUrl);
@@ -1034,6 +1028,116 @@ export class RezkaCatalogService implements OnModuleDestroy {
       episodesBySeason,
       defaults,
     });
+  }
+
+  private parseEpisodeAnchors(
+    list: { querySelectorAll: (selector: string) => unknown[] } | null,
+  ): CatalogEpisode[] {
+    if (!list) return [];
+    // rezka-ua puts data-episode_id on <li>, classic skins use <a>.
+    return list.querySelectorAll('[data-episode_id]').map((node) => {
+      const a = node as {
+        getAttribute: (name: string) => string | undefined;
+        text: string;
+      };
+      const episodeId = a.getAttribute('data-episode_id') ?? '';
+      const id = a.getAttribute('data-id') ?? '';
+      const titleText = a.text.trim();
+      const numMatch = titleText.match(/(\d+)/);
+      return {
+        id,
+        episodeId,
+        title: titleText || (numMatch ? `Episode ${numMatch[1]}` : 'Episode'),
+        number: numMatch ? Number.parseInt(numMatch[1]!, 10) : 0,
+      };
+    });
+  }
+
+  /**
+   * Rezka skins vary: multi-season tabs, single-season episode lists only,
+   * or class-based lists without #simple-seasons-tabs.
+   */
+  private parseSeasonsAndEpisodes(
+    root: ReturnType<typeof parseHtml>,
+    html: string,
+  ): {
+    seasons: CatalogSeason[];
+    episodesBySeason: Record<string, CatalogEpisode[]>;
+  } {
+    const seasons: CatalogSeason[] = [];
+    const episodesBySeason: Record<string, CatalogEpisode[]> = {};
+    const seenSeasonIds = new Set<string>();
+
+    const pushSeason = (id: string, titleText: string) => {
+      const trimmed = id.trim();
+      if (!trimmed || seenSeasonIds.has(trimmed)) return;
+      seenSeasonIds.add(trimmed);
+      const numMatch = titleText.match(/(\d+)/);
+      seasons.push({
+        id: trimmed,
+        title: titleText.trim() || `Season ${trimmed}`,
+        number: numMatch ? Number.parseInt(numMatch[1]!, 10) : Number(trimmed) || 0,
+      });
+    };
+
+    const seasonRoots = [
+      root.getElementById('simple-seasons-tabs'),
+      root.querySelector('.b-simple_seasons__list'),
+      root.querySelector('#simple-seasons-tabs'),
+    ].filter(Boolean);
+
+    for (const seasonsRoot of seasonRoots) {
+      // rezka-ua: <li data-tab_id="1">Сезон 1</li>; older: <a data-tab_id>
+      for (const el of seasonsRoot!.querySelectorAll('[data-tab_id]')) {
+        const node = el as {
+          getAttribute: (name: string) => string | undefined;
+          text: string;
+        };
+        pushSeason(
+          node.getAttribute('data-tab_id') ?? '',
+          node.getAttribute('title') ?? node.text.trim(),
+        );
+      }
+    }
+
+    // Single-season shows often ship only episode lists: #simple-episodes-list-1
+    if (!seasons.length) {
+      const listIds = new Set<string>();
+      for (const match of html.matchAll(
+        /id=["']simple-episodes-list-(\d+)["']/gi,
+      )) {
+        if (match[1]) listIds.add(match[1]);
+      }
+      for (const el of root.querySelectorAll('[id^="simple-episodes-list-"]')) {
+        const id = el.id?.replace(/^simple-episodes-list-/, '') ?? '';
+        if (id) listIds.add(id);
+      }
+      for (const id of [...listIds].sort(
+        (a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10),
+      )) {
+        pushSeason(id, `${id} сезон`);
+      }
+    }
+
+    for (const season of seasons) {
+      const list =
+        root.getElementById(`simple-episodes-list-${season.id}`) ??
+        root.querySelector(`#simple-episodes-list-${season.id}`);
+      const episodes = this.parseEpisodeAnchors(list);
+      if (episodes.length) {
+        episodesBySeason[season.id] = episodes;
+      }
+    }
+
+    // Last resort: flat episode anchors when list wrappers are missing.
+    if (seasons.length && !Object.keys(episodesBySeason).length) {
+      const flat = this.parseEpisodeAnchors(root);
+      if (flat.length) {
+        episodesBySeason[seasons[0]!.id] = flat;
+      }
+    }
+
+    return { seasons, episodesBySeason };
   }
 
   private parseTranslations(
@@ -1270,7 +1374,7 @@ export class RezkaCatalogService implements OnModuleDestroy {
       headers['Range'] = range;
     }
 
-    const upstream = await fetch(targetUrl, {
+    const upstream = await this.outboundFetch(targetUrl, {
       headers,
       redirect: 'follow',
     });

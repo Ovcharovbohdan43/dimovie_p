@@ -202,7 +202,7 @@ export function HostCatalogControls({
                       : "sm:grid-cols-[1fr_auto]",
                   )}
                 >
-                  {catalog.kind === "series" && (
+                  {catalog.kind === "series" && !!catalog.seasons?.length && (
                     <>
                       <label className="block min-w-0">
                         <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.14em] text-white/35">
@@ -215,7 +215,7 @@ export function HostCatalogControls({
                           )}
                           className={selectClass}
                         >
-                          {catalog.seasons?.map((s, index) => (
+                          {catalog.seasons.map((s, index) => (
                             <option key={`season-${s.id}-${index}`} value={s.id}>
                               {s.title}
                             </option>
