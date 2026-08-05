@@ -1,4 +1,9 @@
-import { Injectable, NestMiddleware, HttpStatus } from '@nestjs/common';
+import {
+  Injectable,
+  NestMiddleware,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
 import type { Request, Response, NextFunction } from 'express';
 import { SECURITY_ERROR_CODES } from '@dimovie/shared';
 import { isCorsOriginAllowed } from '../common/cors';
@@ -19,6 +24,8 @@ const SKIP_PREFIXES = [
  */
 @Injectable()
 export class OriginMiddleware implements NestMiddleware {
+  private readonly logger = new Logger(OriginMiddleware.name);
+
   use(req: Request, res: Response, next: NextFunction) {
     if (!MUTATING.has(req.method.toUpperCase())) {
       return next();
@@ -40,6 +47,9 @@ export class OriginMiddleware implements NestMiddleware {
     }
 
     if (origin && !isCorsOriginAllowed(origin)) {
+      this.logger.warn(
+        `Origin rejected method=${req.method} path=${path} origin=${origin}`,
+      );
       return res.status(HttpStatus.FORBIDDEN).json({
         statusCode: HttpStatus.FORBIDDEN,
         message: 'Origin not allowed',
@@ -51,6 +61,9 @@ export class OriginMiddleware implements NestMiddleware {
       try {
         const refOrigin = new URL(referer).origin;
         if (!isCorsOriginAllowed(refOrigin)) {
+          this.logger.warn(
+            `Referer rejected method=${req.method} path=${path} referer=${referer}`,
+          );
           return res.status(HttpStatus.FORBIDDEN).json({
             statusCode: HttpStatus.FORBIDDEN,
             message: 'Referer not allowed',
