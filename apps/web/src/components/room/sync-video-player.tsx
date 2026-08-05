@@ -11,15 +11,13 @@ import {
   getYouTubePlaying,
   playYouTubeFromUserGesture,
   playYouTubeMutedForSync,
+  readYouTubeCaptionTracks,
+  setYouTubeCaptionsEnabled,
+  suggestYouTubeQuality,
   unmuteYouTubeFromUserGesture,
+  type YtCaptionTrack,
 } from "@/lib/youtube-playback";
 import { cn } from "@/lib/utils";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   CaptionsMark,
   CollapseMark,
@@ -45,9 +43,21 @@ interface SyncVideoPlayerProps {
   canControl?: boolean;
 }
 
+const FALLBACK_YT_QUALITIES = [
+  "highres",
+  "hd1080",
+  "hd720",
+  "large",
+  "medium",
+  "small",
+  "tiny",
+  "default",
+] as const;
+
 const QUALITY_LABELS: Record<string, string> = {
   auto: "Auto",
   default: "Auto",
+  highres: "4K",
   hd1080: "1080p",
   hd720: "720p",
   large: "480p",
@@ -63,22 +73,39 @@ function formatTime(seconds: number): string {
 }
 
 const QUALITY_RANK: Record<string, number> = {
+  highres: 2160,
   hd1080: 1080,
   hd720: 720,
   large: 480,
   medium: 360,
   small: 240,
   tiny: 144,
-};
-
-const MAX_QUALITY_YT_KEY: Record<"720p" | "1080p", string> = {
-  "720p": "hd720",
-  "1080p": "hd1080",
+  default: 0,
 };
 
 function filterQualities(levels: string[], maxVideoQuality: "720p" | "1080p") {
   const cap = maxVideoQuality === "720p" ? 720 : 1080;
-  return levels.filter((q) => (QUALITY_RANK[q] ?? 0) <= cap);
+  const filtered = levels.filter((q) => {
+    if (q === "default" || q === "auto") return true;
+    return (QUALITY_RANK[q] ?? 0) <= cap;
+  });
+  return filtered.length ? filtered : ["default"];
+}
+
+function buildQualityOptions(
+  levels: string[],
+  maxVideoQuality: "720p" | "1080p",
+) {
+  const merged = levels.length
+    ? levels
+    : [...FALLBACK_YT_QUALITIES];
+  const filtered = filterQualities(merged, maxVideoQuality);
+  // Keep Auto first, then highest → lowest.
+  const withoutDefault = filtered.filter((q) => q !== "default" && q !== "auto");
+  withoutDefault.sort(
+    (a, b) => (QUALITY_RANK[b] ?? 0) - (QUALITY_RANK[a] ?? 0),
+  );
+  return ["default", ...withoutDefault];
 }
 
 function applySyncToPlayer(
@@ -148,9 +175,16 @@ export function SyncVideoPlayer({
   const playRetryTimers = useRef<number[]>([]);
   const [playerReady, setPlayerReady] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [qualities, setQualities] = useState<string[]>([]);
-  const [activeQuality, setActiveQuality] = useState("auto");
+  const [qualities, setQualities] = useState<string[]>(() =>
+    buildQualityOptions([], maxVideoQuality),
+  );
+  const [activeQuality, setActiveQuality] = useState("default");
   const [captionsOn, setCaptionsOn] = useState(false);
+  const [captionTracks, setCaptionTracks] = useState<YtCaptionTrack[]>([]);
+  const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
+  const [qualityHint, setQualityHint] = useState<string | null>(null);
+  const preferredQualityRef = useRef("default");
+  const captionsWantedRef = useRef(false);
   const [directPlaying, setDirectPlaying] = useState(false);
   const [directTime, setDirectTime] = useState(0);
   const [directDuration, setDirectDuration] = useState(0);
@@ -279,6 +313,17 @@ export function SyncVideoPlayer({
     clearPlayRetries();
     const containerId = `yt-${playerId}`;
 
+    const refreshQualityOptions = (target: YTPlayer) => {
+      try {
+        const levels = target.getAvailableQualityLevels?.() ?? [];
+        setQualities(buildQualityOptions(levels, maxVideoQuality));
+        const current = target.getPlaybackQuality?.();
+        if (current) setActiveQuality(current);
+      } catch {
+        setQualities(buildQualityOptions([], maxVideoQuality));
+      }
+    };
+
     const player = new window.YT!.Player(containerId, {
       videoId: parsed.videoId,
       width: "100%",
@@ -291,6 +336,7 @@ export function SyncVideoPlayer({
         modestbranding: 1,
         enablejsapi: 1,
         cc_load_policy: 1,
+        cc_lang_pref: "en",
         fs: 0,
         playsinline: 1,
         iv_load_policy: 3,
@@ -301,6 +347,7 @@ export function SyncVideoPlayer({
           ytPlayer.current = event.target;
           configureYouTubeIframe(event.target);
           setPlayerReady(true);
+          setQualities(buildQualityOptions([], maxVideoQuality));
 
           try {
             const duration = event.target.getDuration();
@@ -317,24 +364,7 @@ export function SyncVideoPlayer({
             /* captions module optional */
           }
 
-          try {
-            const levels = filterQualities(
-              event.target.getAvailableQualityLevels() ?? [],
-              maxVideoQuality,
-            );
-            if (levels.length) {
-              setQualities(levels);
-              const capKey = MAX_QUALITY_YT_KEY[maxVideoQuality];
-              if (levels.includes(capKey)) {
-                event.target.setPlaybackQuality(capKey);
-                setActiveQuality(capKey);
-              }
-            } else {
-              setActiveQuality(event.target.getPlaybackQuality() ?? "auto");
-            }
-          } catch {
-            /* quality API optional */
-          }
+          refreshQualityOptions(event.target);
 
           if (syncStateRef.current && syncStateRef.current.version > localVersion.current) {
             const state = syncStateRef.current;
@@ -358,8 +388,44 @@ export function SyncVideoPlayer({
             }, 400);
           }
         },
+        onApiChange: () => {
+          const current = ytPlayer.current;
+          if (!current) return;
+          try {
+            const tracks = readYouTubeCaptionTracks(current);
+            setCaptionTracks(tracks);
+            if (captionsWantedRef.current) {
+              const on = setYouTubeCaptionsEnabled(current, true);
+              setCaptionsOn(on);
+            }
+          } catch {
+            /* captions module still warming up */
+          }
+        },
+        onPlaybackQualityChange: (event: { data: string }) => {
+          if (event?.data) {
+            setActiveQuality(event.data);
+          }
+        },
         onStateChange: (event: { data: number }) => {
           const YT = window.YT!;
+          if (
+            event.data === YT.PlayerState.PLAYING ||
+            event.data === YT.PlayerState.BUFFERING
+          ) {
+            if (ytPlayer.current) {
+              refreshQualityOptions(ytPlayer.current);
+              if (preferredQualityRef.current !== "default") {
+                suggestYouTubeQuality(
+                  ytPlayer.current,
+                  preferredQualityRef.current,
+                );
+              }
+              if (captionsWantedRef.current) {
+                setYouTubeCaptionsEnabled(ytPlayer.current, true);
+              }
+            }
+          }
           if (event.data === YT.PlayerState.PLAYING) {
             setYtPlaying(true);
             try {
@@ -404,6 +470,11 @@ export function SyncVideoPlayer({
       setYtTime(0);
       setYtDuration(0);
       setNeedsSoundUnlock(false);
+      setCaptionsOn(false);
+      setCaptionTracks([]);
+      setQualityMenuOpen(false);
+      captionsWantedRef.current = false;
+      preferredQualityRef.current = "default";
     };
   }, [
     parsed.provider,
@@ -555,32 +626,56 @@ export function SyncVideoPlayer({
     }
   }, []);
 
-  const setQuality = useCallback((quality: string) => {
-    if (!ytPlayer.current) return;
-    try {
-      ytPlayer.current.setPlaybackQuality(quality);
+  const setQuality = useCallback(
+    (quality: string) => {
+      if (!ytPlayer.current) return;
+      preferredQualityRef.current = quality;
       setActiveQuality(quality);
-    } catch {
-      /* ignore */
-    }
-  }, []);
+      setQualityMenuOpen(false);
+      suggestYouTubeQuality(ytPlayer.current, quality, parsed.videoId);
+
+      window.setTimeout(() => {
+        const player = ytPlayer.current;
+        if (!player) return;
+        suggestYouTubeQuality(player, quality);
+        try {
+          const actual = player.getPlaybackQuality?.();
+          if (actual) setActiveQuality(actual);
+          if (
+            quality !== "default" &&
+            quality !== "auto" &&
+            actual &&
+            actual !== quality &&
+            actual !== "unknown"
+          ) {
+            setQualityHint("YouTube may keep Auto on embeds");
+            window.setTimeout(() => setQualityHint(null), 3200);
+          } else {
+            setQualityHint(null);
+          }
+        } catch {
+          /* ignore */
+        }
+      }, 700);
+    },
+    [parsed.videoId],
+  );
 
   const toggleCaptions = useCallback(() => {
     if (!ytPlayer.current) return;
-    try {
-      if (captionsOn) {
-        ytPlayer.current.setOption("captions", "track", {});
-        setCaptionsOn(false);
-      } else {
-        ytPlayer.current.setOption("captions", "track", {
-          languageCode: "en",
-        });
-        setCaptionsOn(true);
-      }
-    } catch {
-      /* ignore */
+    const next = !captionsWantedRef.current;
+    captionsWantedRef.current = next;
+    const on = setYouTubeCaptionsEnabled(ytPlayer.current, next);
+    setCaptionsOn(on);
+    if (next && !on) {
+      // Module may not be ready yet — onApiChange / PLAYING will retry via ref.
+      setCaptionsOn(true);
     }
-  }, [captionsOn]);
+    if (next) {
+      const tracks = readYouTubeCaptionTracks(ytPlayer.current);
+      setCaptionTracks(tracks);
+    }
+  }, []);
 
   const toggleDirectFullscreen = useCallback(async () => {
     const el = parsed.provider === "direct" ? videoRef.current : containerRef.current;
@@ -592,7 +687,7 @@ export function SyncVideoPlayer({
     }
   }, [parsed.provider]);
 
-  const showQuality = isYoutube && qualities.length > 0;
+  const showQuality = isYoutube;
   const showCaptions = isYoutube;
   const locallyPlaying = isDirect ? directPlaying : isYoutube ? ytPlaying : false;
   const progressMax = isDirect ? directDuration : isYoutube ? ytDuration : 0;
@@ -603,7 +698,12 @@ export function SyncVideoPlayer({
   const uiTime = seekValue ?? (isDirect ? directTime : isYoutube ? ytTime : (syncState?.time ?? 0));
   const showProgress = (isDirect || isYoutube) && progressMax > 0;
   const controlsVisible =
-    controlsPinned || scrubbing || seekValue !== null || !locallyPlaying || needsSoundUnlock;
+    controlsPinned ||
+    scrubbing ||
+    seekValue !== null ||
+    !locallyPlaying ||
+    needsSoundUnlock ||
+    qualityMenuOpen;
 
   const clearHideTimer = useCallback(() => {
     if (hideTimer.current != null) {
@@ -619,7 +719,9 @@ export function SyncVideoPlayer({
 
   const scheduleHideControls = useCallback(() => {
     clearHideTimer();
-    if (scrubbing || seekValue !== null || needsSoundUnlock) return;
+    if (scrubbing || seekValue !== null || needsSoundUnlock || qualityMenuOpen) {
+      return;
+    }
     const playing = isDirect
       ? directPlaying
       : isYoutube
@@ -634,6 +736,7 @@ export function SyncVideoPlayer({
     scrubbing,
     seekValue,
     needsSoundUnlock,
+    qualityMenuOpen,
     isDirect,
     isYoutube,
     directPlaying,
@@ -676,7 +779,25 @@ export function SyncVideoPlayer({
   );
 
   useEffect(() => {
-    if (!locallyPlaying || scrubbing || seekValue !== null || needsSoundUnlock) {
+    if (!qualityMenuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setQualityMenuOpen(false);
+    };
+    const onPointer = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("[data-quality-menu]")) return;
+      setQualityMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onPointer);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onPointer);
+    };
+  }, [qualityMenuOpen]);
+
+  useEffect(() => {
+    if (!locallyPlaying || scrubbing || seekValue !== null || needsSoundUnlock || qualityMenuOpen) {
       setControlsPinned(true);
       clearHideTimer();
       return;
@@ -688,6 +809,7 @@ export function SyncVideoPlayer({
     scrubbing,
     seekValue,
     needsSoundUnlock,
+    qualityMenuOpen,
     scheduleHideControls,
     clearHideTimer,
   ]);
@@ -1167,44 +1289,86 @@ export function SyncVideoPlayer({
                 type="button"
                 className="player-ctrl"
                 data-active={captionsOn ? "true" : undefined}
-                onClick={toggleCaptions}
-                title="Subtitles"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  revealControls();
+                  toggleCaptions();
+                  scheduleHideControls();
+                }}
+                title={
+                  captionsOn
+                    ? "Hide subtitles"
+                    : captionTracks.length
+                      ? "Show subtitles"
+                      : "Subtitles (if available)"
+                }
               >
                 <CaptionsMark className="size-4" />
               </button>
             )}
 
             {showQuality && (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <button
-                      type="button"
-                      title="Quality"
-                      className="player-ctrl player-ctrl--label font-mono text-[10px] font-semibold tracking-[0.08em] text-white/70 hover:text-white"
-                    >
-                      {QUALITY_LABELS[activeQuality] ?? "Auto"}
-                    </button>
-                  }
-                />
-                <DropdownMenuContent
-                  align="end"
-                  className="min-w-[7rem] rounded-xl border-white/10 bg-[#0c0c10] p-1"
+              <div className="relative" data-quality-menu>
+                <button
+                  type="button"
+                  title="Quality"
+                  className="player-ctrl player-ctrl--label font-mono text-[10px] font-semibold tracking-[0.08em] text-white/70 hover:text-white"
+                  data-active={qualityMenuOpen ? "true" : undefined}
+                  aria-expanded={qualityMenuOpen}
+                  aria-haspopup="listbox"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    revealControls();
+                    setQualityMenuOpen((open) => !open);
+                  }}
                 >
-                  {qualities.map((q) => (
-                    <DropdownMenuItem
-                      key={q}
-                      onClick={() => setQuality(q)}
-                      className={cn(
-                        "rounded-lg font-mono text-xs",
-                        activeQuality === q && "bg-white/[0.04] text-[#e50914]",
-                      )}
-                    >
-                      {QUALITY_LABELS[q] ?? q}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                  {QUALITY_LABELS[activeQuality] ??
+                    QUALITY_LABELS[preferredQualityRef.current] ??
+                    "Auto"}
+                </button>
+                {qualityMenuOpen && (
+                  <div
+                    role="listbox"
+                    aria-label="Video quality"
+                    className="absolute bottom-[calc(100%+0.5rem)] right-0 z-40 min-w-[8.5rem] overflow-hidden rounded-xl border border-white/10 bg-[#0c0c10]/96 p-1 shadow-[0_16px_48px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {qualities.map((q) => {
+                      const selected =
+                        preferredQualityRef.current === q ||
+                        activeQuality === q;
+                      return (
+                        <button
+                          key={q}
+                          type="button"
+                          role="option"
+                          aria-selected={selected}
+                          className={cn(
+                            "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left font-mono text-xs transition",
+                            selected
+                              ? "bg-white/[0.06] text-[#e50914]"
+                              : "text-white/75 hover:bg-white/[0.05] hover:text-white",
+                          )}
+                          onClick={() => setQuality(q)}
+                        >
+                          <span>{QUALITY_LABELS[q] ?? q}</span>
+                          {selected && (
+                            <span className="text-[10px] tracking-wide text-white/35">
+                              ON
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                    {qualityHint && (
+                      <p className="border-t border-white/8 px-2.5 py-2 text-[10px] leading-snug text-white/40">
+                        {qualityHint}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
 
             <button

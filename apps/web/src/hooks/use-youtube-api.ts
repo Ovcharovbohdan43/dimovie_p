@@ -31,10 +31,23 @@ export interface YTPlayer {
   getPlayerState: () => number;
   getAvailableQualityLevels: () => string[];
   setPlaybackQuality: (quality: string) => void;
+  setPlaybackQualityRange?: (minQuality: string, maxQuality: string) => void;
   getPlaybackQuality: () => string;
   loadModule: (module: string) => void;
+  unloadModule: (module: string) => void;
   setOption: (module: string, option: string, value: unknown) => void;
   getOption: (module: string, option: string) => unknown;
+  getOptions?: (module?: string) => string[];
+  loadVideoById?: (
+    opts:
+      | string
+      | {
+          videoId: string;
+          startSeconds?: number;
+          endSeconds?: number;
+          suggestedQuality?: string;
+        },
+  ) => void;
   mute: () => void;
   unMute: () => void;
   isMuted: () => boolean;
