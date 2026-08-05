@@ -1,8 +1,15 @@
 "use client";
 
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import type { RoomSummary } from "@dimovie/shared";
 import { getVideoPreview } from "@dimovie/shared";
 import { cn } from "@/lib/utils";
@@ -12,6 +19,8 @@ interface RoomCardProps {
   room: RoomSummary;
   className?: string;
 }
+
+const DESC_CLAMP_LINES = 2;
 
 function getRoomPreview(room: RoomSummary) {
   const meta = room.videoSource?.metadata as
@@ -35,25 +44,117 @@ function privacyLabel(privacy: string) {
   return "Private";
 }
 
+function DescriptionBlock({
+  text,
+  expanded,
+  onToggle,
+}: {
+  text: string;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const measureRef = useRef<HTMLParagraphElement>(null);
+  const [needsMore, setNeedsMore] = useState(false);
+
+  const measure = useCallback(() => {
+    const el = measureRef.current;
+    if (!el) return;
+    const wasClamped = el.classList.contains("line-clamp-2");
+    el.classList.remove("line-clamp-2");
+    const fullHeight = el.scrollHeight;
+    el.classList.add("line-clamp-2");
+    const clampedHeight = el.clientHeight;
+    if (!wasClamped && expanded) {
+      el.classList.remove("line-clamp-2");
+    }
+    setNeedsMore(fullHeight > clampedHeight + 1);
+  }, [expanded]);
+
+  useLayoutEffect(() => {
+    measure();
+  }, [text, measure]);
+
+  useEffect(() => {
+    const el = measureRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [measure]);
+
+  return (
+    <div className="flex min-h-[3.25rem] flex-col">
+      <motion.div
+        initial={false}
+        animate={{
+          height: expanded ? "auto" : `${DESC_CLAMP_LINES * 1.625}rem`,
+        }}
+        transition={{ type: "spring", stiffness: 380, damping: 32, mass: 0.7 }}
+        className="overflow-hidden"
+      >
+        <p
+          ref={measureRef}
+          className={cn(
+            "text-xs leading-relaxed text-white/55",
+            !expanded && "line-clamp-2",
+          )}
+        >
+          {text}
+        </p>
+      </motion.div>
+
+      <AnimatePresence initial={false}>
+        {needsMore ? (
+          <motion.button
+            key="more"
+            type="button"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18 }}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggle();
+            }}
+            className="mt-1.5 self-start text-[11px] font-semibold tracking-[-0.01em] text-[#9ec9ea] transition hover:text-white"
+          >
+            {expanded ? "Show less" : "More"}
+          </motion.button>
+        ) : (
+          // Reserve space so cards without a long description stay the same height.
+          <span className="mt-1.5 block h-[1.125rem]" aria-hidden />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 export function RoomCard({ room, className }: RoomCardProps) {
   const { title, thumbnail } = getRoomPreview(room);
   const hasVideo = !!room.videoSource?.url;
   const isLive = hasVideo && room.participantCount > 0;
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <motion.div
+      layout
       className={cn(
-        "w-[72vw] max-w-[300px] flex-shrink-0 snap-start sm:w-[260px] md:w-[280px] lg:w-[300px]",
+        "w-[72vw] max-w-[300px] flex-shrink-0 snap-start self-start sm:w-[260px] md:w-[280px] lg:w-[300px]",
+        expanded && "relative z-20",
         className,
       )}
-      whileHover={{ y: -4 }}
-      transition={{ type: "spring", stiffness: 420, damping: 28 }}
+      whileHover={{ y: expanded ? 0 : -4 }}
+      transition={{
+        layout: { type: "spring", stiffness: 340, damping: 30, mass: 0.8 },
+        y: { type: "spring", stiffness: 420, damping: 28 },
+      }}
     >
       <Link
         href={`/room/${room.roomCode}`}
-        className="dm-card group relative block outline-none ring-offset-2 ring-offset-[#050508] focus-visible:ring-2 focus-visible:ring-white/40"
+        className="dm-card group relative flex h-full min-h-[318px] flex-col outline-none ring-offset-2 ring-offset-[#050508] focus-visible:ring-2 focus-visible:ring-white/40"
       >
-        <div className="relative aspect-video w-full overflow-hidden bg-[#1a1a22]">
+        <div className="relative aspect-video w-full shrink-0 overflow-hidden bg-[#1a1a22]">
           {thumbnail ? (
             <Image
               src={thumbnail}
@@ -94,20 +195,29 @@ export function RoomCard({ room, className }: RoomCardProps) {
           </div>
         </div>
 
-        <div className="space-y-2 px-4 py-4">
-          <h3 className="line-clamp-1 font-sans text-[15px] font-semibold tracking-[-0.02em] text-white">
+        <div className="flex flex-1 flex-col gap-2 px-4 py-4">
+          <h3 className="line-clamp-1 min-h-[1.35rem] font-sans text-[15px] font-semibold tracking-[-0.02em] text-white">
             {title}
           </h3>
-          <p className="text-xs text-white/45">
+          <p className="min-h-[1rem] text-xs text-white/45">
             {room.owner.displayName}
             <span className="mx-1.5 text-white/20">·</span>
             {room.participantCount} watching
           </p>
-          {room.description ? (
-            <p className="line-clamp-2 text-xs leading-relaxed text-white/55">
-              {room.description}
-            </p>
-          ) : null}
+
+          {room.description?.trim() ? (
+            <DescriptionBlock
+              text={room.description.trim()}
+              expanded={expanded}
+              onToggle={() => setExpanded((v) => !v)}
+            />
+          ) : (
+            // Keep empty-description cards the same footprint.
+            <div className="min-h-[3.25rem]" aria-hidden>
+              <div className="h-[2.5rem]" />
+              <span className="mt-1.5 block h-[1.125rem]" />
+            </div>
+          )}
         </div>
       </Link>
     </motion.div>

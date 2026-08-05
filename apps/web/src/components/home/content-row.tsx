@@ -94,7 +94,7 @@ export function ContentRow({ title, children, className }: ContentRowProps) {
         />
         <div
           ref={scrollRef}
-          className="scrollbar-hide flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2"
+          className="scrollbar-hide flex snap-x snap-mandatory items-start gap-4 overflow-x-auto overflow-y-visible pb-2"
         >
           {children}
         </div>
