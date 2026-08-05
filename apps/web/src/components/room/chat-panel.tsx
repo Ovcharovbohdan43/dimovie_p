@@ -65,8 +65,17 @@ export function ChatPanel({
   const [unseenBelow, setUnseenBelow] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const typingTimer = useRef<number | null>(null);
   const prevCountRef = useRef(messages.length);
+
+  const resizeComposer = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    const next = Math.min(el.scrollHeight, 112);
+    el.style.height = `${Math.max(next, 44)}px`;
+  }, []);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     const el = scrollRef.current;
@@ -75,6 +84,10 @@ export function ChatPanel({
     setStickToBottom(true);
     setUnseenBelow(0);
   }, []);
+
+  useEffect(() => {
+    resizeComposer();
+  }, [input, resizeComposer]);
 
   useEffect(() => {
     const prev = prevCountRef.current;
@@ -127,6 +140,7 @@ export function ChatPanel({
     onSend(text);
     setInput("");
     setStickToBottom(true);
+    requestAnimationFrame(resizeComposer);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -264,7 +278,7 @@ export function ChatPanel({
                           failed && "ring-[#e50914]/35",
                         )}
                       >
-                        <p className="max-h-36 overflow-y-auto break-words text-sm leading-snug whitespace-pre-wrap text-white/90 [overflow-wrap:anywhere] scrollbar-dimovie">
+                        <p className="break-words text-sm leading-snug whitespace-pre-wrap text-white/90 [overflow-wrap:anywhere]">
                           {msg.content}
                         </p>
                         <div
@@ -353,8 +367,9 @@ export function ChatPanel({
             onReaction={onReaction}
           />
         </div>
-        <form onSubmit={handleSubmit} className="relative">
+        <form onSubmit={handleSubmit} className="flex items-end gap-2">
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => handleChange(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -364,7 +379,7 @@ export function ChatPanel({
                 ? `Wait ${chatCooldown}s…`
                 : "Send a message…"
             }
-            className="max-h-28 min-h-11 w-full resize-none rounded-2xl border border-white/[0.08] bg-white/[0.04] py-2.5 pl-3.5 pr-12 text-sm text-white placeholder:text-white/30 outline-none focus-visible:ring-2 focus-visible:ring-white/25 disabled:opacity-50"
+            className="max-h-28 min-h-11 flex-1 resize-none overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2.5 text-sm leading-5 text-white placeholder:text-white/30 outline-none focus-visible:ring-2 focus-visible:ring-white/25 disabled:opacity-50 scrollbar-hide"
             maxLength={CHAT_MAX_LENGTH}
             disabled={chatCooldown > 0}
             aria-label="Message"
@@ -374,7 +389,7 @@ export function ChatPanel({
             disabled={!input.trim() || chatCooldown > 0}
             aria-label="Send message"
             className={cn(
-              "absolute right-1.5 bottom-1.5 flex size-8 items-center justify-center rounded-full transition",
+              "mb-0.5 flex size-10 shrink-0 items-center justify-center rounded-full transition",
               input.trim() && chatCooldown === 0
                 ? "bg-white text-black hover:bg-white/90"
                 : "bg-white/10 text-white/30",
