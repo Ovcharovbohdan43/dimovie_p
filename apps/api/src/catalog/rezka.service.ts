@@ -22,10 +22,19 @@ import {
   normalizeCatalogInfo,
   parseEpisodeFromRezkaUrl,
 } from '@dimovie/shared';
+import {
+  buildPassChallengeUrl,
+  extractAnubisChallenge,
+  isAnubisChallengeHtml,
+  readJsonScript,
+  solveAnubisPow,
+} from './anubis';
 
 const TRASH = ['@', '#', '!', '^', '$'];
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const HTML_ACCEPT =
+  'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
 
 function product(iterables: string[], repeat: number): string[][] {
   const copies: string[][] = [];
@@ -123,12 +132,8 @@ function pickBestQuality(qualities: Record<string, string>): {
 }
 
 function isBotChallengeHtml(html: string): boolean {
-  const lower = html.toLowerCase();
   return (
-    lower.includes('anubis_challenge') ||
-    lower.includes('techaro.lol') ||
-    html.includes('не бот') ||
-    html.includes('Проверяем, что вы не бот') ||
+    isAnubisChallengeHtml(html) ||
     // Legacy mojibake of «не бот» seen in some Railway log encodings
     html.includes('╨╜╨╡ ╨▒╨╛╤é') ||
     (html.length < 8000 && !html.includes('user-favorites-holder'))
@@ -237,7 +242,14 @@ export class RezkaCatalogService implements OnModuleDestroy {
         if (!trimmed) continue;
         const eq = trimmed.indexOf('=');
         if (eq <= 0) continue;
-        map.set(trimmed.slice(0, eq), trimmed.slice(eq + 1));
+        const name = trimmed.slice(0, eq);
+        const value = trimmed.slice(eq + 1);
+        // Anubis clears auth with Max-Age=0 / empty value — drop it.
+        if (value === '') {
+          map.delete(name);
+          continue;
+        }
+        map.set(name, value);
       }
     }
     return [...map.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
@@ -420,51 +432,168 @@ export class RezkaCatalogService implements OnModuleDestroy {
     return this.browser;
   }
 
-  /** Prefer plain HTTP — avoids Chromium OOM on small Railway instances. */
+  private htmlRequestHeaders(cookieHeader?: string): Record<string, string> {
+    return {
+      'User-Agent': USER_AGENT,
+      Accept: HTML_ACCEPT,
+      'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Accept-Encoding': 'gzip, deflate, br',
+      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+    };
+  }
+
+  /**
+   * Solve Anubis PoW in Node (no Chromium). Challenge is bound to User-Agent,
+   * so the same UA must be used for pass-challenge + the follow-up page fetch.
+   */
+  private async passAnubisChallenge(
+    catalogUrl: string,
+    challengeHtml: string,
+    seedCookies: string,
+  ): Promise<string | null> {
+    const challenge = extractAnubisChallenge(challengeHtml);
+    if (!challenge) {
+      this.logger.warn('Anubis HTML present but challenge JSON missing');
+      return null;
+    }
+
+    const difficulty =
+      challenge.rules.difficulty ?? challenge.challenge.difficulty ?? 5;
+    const solution = solveAnubisPow(challenge.challenge.randomData, difficulty);
+    this.logger.log(
+      `Anubis PoW solved difficulty=${difficulty} nonce=${solution.nonce} in ${solution.elapsedMs}ms`,
+    );
+
+    const basePrefix = readJsonScript<string>(challengeHtml, 'anubis_base_prefix') ?? '';
+    const passUrl = buildPassChallengeUrl(
+      catalogUrl,
+      typeof basePrefix === 'string' ? basePrefix : '',
+      challenge,
+      solution,
+    );
+
+    const passResponse = await fetch(passUrl, {
+      headers: this.htmlRequestHeaders(seedCookies),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(20000),
+    });
+    const passCookies =
+      typeof passResponse.headers.getSetCookie === 'function'
+        ? passResponse.headers.getSetCookie()
+        : [];
+    const cookieHeader = this.mergeCookieHeaders(
+      seedCookies,
+      this.cookieHeaderFromSetCookie(passCookies),
+    );
+
+    if (
+      passResponse.status !== 302 &&
+      passResponse.status !== 303 &&
+      passResponse.status !== 200
+    ) {
+      this.logger.warn(
+        `Anubis pass-challenge HTTP ${passResponse.status}`,
+      );
+      return cookieHeader.includes('techaro.lol-anubis-auth=')
+        ? cookieHeader
+        : null;
+    }
+
+    if (!cookieHeader.includes('techaro.lol-anubis-auth=')) {
+      this.logger.warn('Anubis pass-challenge returned no auth cookie');
+      return null;
+    }
+
+    return cookieHeader;
+  }
+
+  /** Prefer plain HTTP + Node Anubis — avoids Chromium OOM on small Railway boxes. */
   private async fetchHtmlLight(
     catalogUrl: string,
   ): Promise<{ html: string; cookieHeader: string } | null> {
     try {
       const origin = new URL(catalogUrl).origin;
-      const knownCookies = this.getOriginCookies(origin);
+      let cookieHeader = this.getOriginCookies(origin);
+
       const response = await fetch(catalogUrl, {
-        headers: {
-          'User-Agent': USER_AGENT,
-          Accept:
-            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Accept-Encoding': 'gzip, deflate, br',
-          ...(knownCookies ? { Cookie: knownCookies } : {}),
-        },
+        headers: this.htmlRequestHeaders(cookieHeader),
         redirect: 'follow',
         signal: AbortSignal.timeout(25000),
       });
-      if (!response.ok) {
-        this.logger.warn(
-          `Light catalog fetch HTTP ${response.status} for ${catalogUrl}`,
-        );
-        return null;
-      }
 
-      const cookies =
+      const setCookies =
         typeof response.headers.getSetCookie === 'function'
           ? response.headers.getSetCookie()
           : [];
-      const cookieHeader = this.mergeCookieHeaders(
-        knownCookies,
-        this.cookieHeaderFromSetCookie(cookies),
+      cookieHeader = this.mergeCookieHeaders(
+        cookieHeader,
+        this.cookieHeaderFromSetCookie(setCookies),
       );
-      const html = await response.text();
-      if (isBotChallengeHtml(html) || !looksLikeCatalogHtml(html)) {
-        this.logger.log(
-          `Light catalog fetch needs browser fallback for ${catalogUrl}`,
+      let html = await response.text();
+
+      if (!response.ok) {
+        this.logger.warn(
+          `Light catalog fetch HTTP ${response.status} len=${html.length} for ${catalogUrl}`,
         );
+        // rezka-ua often returns 403 for datacenter IPs, but body may still be Anubis.
+        if (!isAnubisChallengeHtml(html) && !looksLikeCatalogHtml(html)) {
+          return null;
+        }
+      }
+
+      if (looksLikeCatalogHtml(html) && !isAnubisChallengeHtml(html)) {
+        this.rememberOriginCookies(origin, cookieHeader);
+        this.logger.log(`Light catalog fetch ok for ${catalogUrl}`);
+        return { html, cookieHeader };
+      }
+
+      if (isAnubisChallengeHtml(html)) {
+        this.logger.log('Anubis challenge on light fetch — solving in Node');
+        const authed = await this.passAnubisChallenge(
+          catalogUrl,
+          html,
+          cookieHeader,
+        );
+        if (!authed) {
+          this.logger.warn('Anubis Node solve failed, will try Playwright');
+          return null;
+        }
+
+        cookieHeader = authed;
+        const retry = await fetch(catalogUrl, {
+          headers: this.htmlRequestHeaders(cookieHeader),
+          redirect: 'follow',
+          signal: AbortSignal.timeout(25000),
+        });
+        const retryCookies =
+          typeof retry.headers.getSetCookie === 'function'
+            ? retry.headers.getSetCookie()
+            : [];
+        cookieHeader = this.mergeCookieHeaders(
+          cookieHeader,
+          this.cookieHeaderFromSetCookie(retryCookies),
+        );
+        html = await retry.text();
+
+        if (looksLikeCatalogHtml(html) && !isAnubisChallengeHtml(html)) {
+          this.rememberOriginCookies(origin, cookieHeader);
+          this.logger.log(
+            `Light catalog fetch ok after Anubis for ${catalogUrl}`,
+          );
+          return { html, cookieHeader };
+        }
+
+        this.logger.warn(
+          `Catalog HTML still missing after Anubis (HTTP ${retry.status}, len=${html.length})`,
+        );
+        this.rememberOriginCookies(origin, cookieHeader);
         return null;
       }
 
-      this.rememberOriginCookies(origin, cookieHeader);
-      this.logger.log(`Light catalog fetch ok for ${catalogUrl}`);
-      return { html, cookieHeader };
+      this.logger.log(
+        `Light catalog fetch needs browser fallback for ${catalogUrl}`,
+      );
+      return null;
     } catch (err) {
       this.logger.warn(
         `Light catalog fetch failed: ${err instanceof Error ? err.message : err}`,
@@ -476,30 +605,9 @@ export class RezkaCatalogService implements OnModuleDestroy {
   /** Warm cookies even when the HTML is a bot challenge (ajax may still work). */
   private async fetchCookiesLight(catalogUrl: string): Promise<string> {
     try {
-      const origin = new URL(catalogUrl).origin;
-      const knownCookies = this.getOriginCookies(origin);
-      const response = await fetch(catalogUrl, {
-        headers: {
-          'User-Agent': USER_AGENT,
-          Accept:
-            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Accept-Encoding': 'gzip, deflate, br',
-          ...(knownCookies ? { Cookie: knownCookies } : {}),
-        },
-        redirect: 'follow',
-        signal: AbortSignal.timeout(20000),
-      });
-      const cookies =
-        typeof response.headers.getSetCookie === 'function'
-          ? response.headers.getSetCookie()
-          : [];
-      const cookieHeader = this.mergeCookieHeaders(
-        knownCookies,
-        this.cookieHeaderFromSetCookie(cookies),
-      );
-      this.rememberOriginCookies(origin, cookieHeader);
-      return cookieHeader;
+      const warmed = await this.fetchHtmlLight(catalogUrl);
+      if (warmed?.cookieHeader) return warmed.cookieHeader;
+      return this.getOriginCookies(new URL(catalogUrl).origin);
     } catch {
       return this.getOriginCookies(new URL(catalogUrl).origin);
     }
@@ -556,25 +664,72 @@ export class RezkaCatalogService implements OnModuleDestroy {
 
         const page = await context.newPage();
         try {
-          await page.goto(catalogUrl, {
+          this.logger.log(`Playwright goto ${catalogUrl}`);
+          const nav = await page.goto(catalogUrl, {
             waitUntil: 'domcontentloaded',
             timeout: 60000,
           });
+          this.logger.log(
+            `Playwright landed status=${nav?.status() ?? 'n/a'} url=${page.url()}`,
+          );
 
-          // Anubis PoW can take well over 30s on small Railway CPUs.
           try {
-            const challengeHtml = await page.content();
-            if (isBotChallengeHtml(challengeHtml)) {
+            let challengeHtml = await page.content();
+            if (isAnubisChallengeHtml(challengeHtml)) {
               this.logger.log(
-                `Anubis challenge detected, waiting for catalog HTML…`,
+                'Playwright hit Anubis — solving PoW in Node, then reload',
+              );
+              const jar = (await context.cookies())
+                .map((c) => `${c.name}=${c.value}`)
+                .join('; ');
+              const authed = await this.passAnubisChallenge(
+                catalogUrl,
+                challengeHtml,
+                jar,
+              );
+              if (authed) {
+                const host = new URL(origin).hostname;
+                const cookieList = authed
+                  .split(';')
+                  .map((part) => part.trim())
+                  .filter(Boolean)
+                  .map((part) => {
+                    const eq = part.indexOf('=');
+                    return {
+                      name: part.slice(0, eq),
+                      value: part.slice(eq + 1),
+                      domain: host,
+                      path: '/',
+                    };
+                  })
+                  .filter((c) => c.name && c.value);
+                if (cookieList.length) {
+                  await context.addCookies(cookieList);
+                }
+                await page.goto(catalogUrl, {
+                  waitUntil: 'domcontentloaded',
+                  timeout: 60000,
+                });
+                challengeHtml = await page.content();
+              } else {
+                this.logger.warn(
+                  'Node Anubis solve failed inside Playwright; waiting on page JS…',
+                );
+              }
+            }
+
+            if (
+              !looksLikeCatalogHtml(challengeHtml) ||
+              isAnubisChallengeHtml(challengeHtml)
+            ) {
+              await page.waitForFunction(
+                () =>
+                  !!document.getElementById('user-favorites-holder') ||
+                  !!document.querySelector('.b-post__title'),
+                { timeout: 45000 },
               );
             }
-            await page.waitForFunction(
-              () =>
-                !!document.getElementById('user-favorites-holder') ||
-                !!document.querySelector('.b-post__title'),
-              { timeout: 90000 },
-            );
+
             // Translators / player scripts often hydrate after the title shell.
             await page
               .waitForFunction(
@@ -590,6 +745,9 @@ export class RezkaCatalogService implements OnModuleDestroy {
               .catch(() => undefined);
           } catch {
             const html = await page.content();
+            this.logger.warn(
+              `Playwright catalog wait failed len=${html.length} anubis=${isAnubisChallengeHtml(html)} snippet=${html.slice(0, 180).replace(/\s+/g, ' ')}`,
+            );
             if (isBotChallengeHtml(html)) {
               throw new NotFoundException(
                 'Catalog site blocked automated access. Try again in a moment.',
