@@ -57,21 +57,7 @@ export function RoomHeader({
     const url = `${window.location.origin}/join/${code}`;
     setShareError(false);
 
-    try {
-      if (typeof navigator.share === "function") {
-        await navigator.share({
-          title: "DiMovie party",
-          text: `Join my DiMovie room ${code}`,
-          url,
-        });
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 2000);
-        return;
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-    }
-
+    // Always copy immediately — navigator.share opens a sheet and skips clipboard.
     const ok = await copyText(url);
     if (ok) {
       setCopied(true);
