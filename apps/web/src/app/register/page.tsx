@@ -100,6 +100,18 @@ export default function RegisterPage() {
           >
             {registerUser.isPending ? "Creating..." : "Create Account"}
           </Button>
+
+          <p className="text-center text-xs leading-relaxed text-white/40">
+            By creating an account you agree to our{" "}
+            <Link href="/terms" className="text-[#00a8e1] hover:underline">
+              Terms of Use
+            </Link>{" "}
+            and{" "}
+            <Link href="/privacy" className="text-[#00a8e1] hover:underline">
+              Privacy Policy
+            </Link>
+            .
+          </p>
         </form>
 
         <p className="text-center text-sm text-white/50">

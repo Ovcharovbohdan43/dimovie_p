@@ -4,6 +4,8 @@ import "./globals.css";
 import { QueryProvider } from "@/providers/query-provider";
 import { Navbar } from "@/components/layout/navbar";
 import { MotionProvider } from "@/providers/motion-provider";
+import { SiteFooter } from "@/components/legal/site-footer";
+import { CookieConsent } from "@/components/legal/cookie-consent";
 
 const manrope = Manrope({
   variable: "--font-sans",
@@ -38,6 +40,8 @@ export default function RootLayout({
           <MotionProvider>
             <Navbar />
             <main className="relative">{children}</main>
+            <SiteFooter />
+            <CookieConsent />
           </MotionProvider>
         </QueryProvider>
       </body>
