@@ -17,7 +17,7 @@ export function FinalCta({ isAuthenticated }: FinalCtaProps) {
     <section className="relative overflow-hidden px-4 py-20 sm:px-6 md:px-10 md:py-28 lg:px-14">
       <div
         aria-hidden
-        className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(229,9,20,0.18),transparent_55%),radial-gradient(ellipse_at_80%_100%,rgba(0,168,225,0.12),transparent_45%)]"
+        className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(229,9,20,0.18),transparent_55%),radial-gradient(ellipse_at_80%_100%,rgba(0,168,225,0.1),transparent_45%)]"
       />
       <motion.div
         className="relative mx-auto max-w-3xl text-center"
@@ -27,11 +27,11 @@ export function FinalCta({ isAuthenticated }: FinalCtaProps) {
         transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
       >
         <h2 className="font-display text-[clamp(2rem,5vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-white">
-          Ready when your friends are.
+          Open a room. Send the link. Press play.
         </h2>
-        <p className="mx-auto mt-4 max-w-[36ch] text-sm text-white/60 md:text-base">
-          Spin up a party, send the code, press play. DiMovie keeps the room in
-          time.
+        <p className="mx-auto mt-4 max-w-[40ch] text-sm text-white/60 md:text-base">
+          Free to start. Sync, voice, and chat in one place — so the reaction
+          hits on the same frame for everyone.
         </p>
         <div className="mt-8 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
           <Link

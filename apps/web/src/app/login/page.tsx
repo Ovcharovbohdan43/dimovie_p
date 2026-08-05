@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { API_URL, ApiError } from "@/lib/api";
 import { toUserMessage } from "@/lib/user-message";
 import { CinematicShell } from "@/components/layout/cinematic-shell";
+import { DiMovieLogo } from "@/components/brand/dimovie-logo";
 import { LoadingScreen } from "@/components/ui/loading-spinner";
 import {
   TurnstileWidget,
@@ -74,10 +75,12 @@ function LoginForm() {
   return (
     <CinematicShell>
       <div className="space-y-7">
-        <div className="text-center">
-          <p className="font-display text-4xl font-bold tracking-[-0.04em] text-[#e50914]">
-            DiMovie
-          </p>
+        <div className="flex flex-col items-center text-center">
+          <DiMovieLogo
+            className="justify-center"
+            markClassName="size-10"
+            wordmarkClassName="text-3xl sm:text-4xl"
+          />
           <h1 className="mt-3 font-display text-xl font-semibold tracking-[-0.02em] text-white">
             Sign in to your account
           </h1>

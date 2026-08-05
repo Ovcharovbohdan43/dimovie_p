@@ -16,6 +16,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { PlayMark } from "@/components/home/marks";
+import { DiMovieLogo } from "@/components/brand/dimovie-logo";
 
 export function Navbar() {
   const pathname = usePathname();
@@ -49,11 +50,11 @@ export function Navbar() {
     >
       <div className="mx-auto flex h-14 max-w-[1920px] items-center justify-between gap-3 px-4 sm:h-16 sm:px-6 md:px-10 lg:px-14">
         <div className="flex min-w-0 items-center gap-6 md:gap-8">
-          <Link
-            href="/"
-            className="font-display text-xl font-bold tracking-[-0.04em] text-[#e50914] sm:text-2xl"
-          >
-            DiMovie
+          <Link href="/" className="min-w-0 shrink-0">
+            <DiMovieLogo
+              markClassName="size-7 sm:size-8"
+              wordmarkClassName="text-xl sm:text-2xl"
+            />
           </Link>
           {user && (
             <nav className="hidden items-center gap-5 md:flex">

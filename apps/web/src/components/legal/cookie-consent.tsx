@@ -14,6 +14,7 @@ import {
   type CookiePreferences,
 } from "@/lib/cookies/consent";
 import { cn } from "@/lib/utils";
+import { DiMovieLogo } from "@/components/brand/dimovie-logo";
 
 type PanelMode = "banner" | "settings" | "hidden";
 
@@ -108,9 +109,11 @@ export function CookieConsent() {
             className="h-px w-full bg-gradient-to-r from-transparent via-[#e50914]/70 to-transparent"
           />
           <div className="p-5 sm:p-6">
-            <p className="font-display text-xs font-semibold tracking-[0.08em] text-[#e50914] uppercase">
-              DiMovie
-            </p>
+            <DiMovieLogo
+              markClassName="size-5"
+              wordmarkClassName="text-xs uppercase tracking-[0.08em]"
+              className="gap-1.5"
+            />
             <h2
               id="cookie-consent-title"
               className="mt-1.5 font-display text-xl font-semibold tracking-[-0.02em] text-white sm:text-2xl"

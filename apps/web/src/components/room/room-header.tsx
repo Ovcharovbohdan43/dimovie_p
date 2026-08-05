@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { RoomSummary } from "@dimovie/shared";
 import { cn } from "@/lib/utils";
 import { BackMark, ShareMark } from "@/components/home/marks";
+import { DiMovieLogo } from "@/components/brand/dimovie-logo";
 
 interface RoomHeaderProps {
   room: RoomSummary;
@@ -84,12 +85,12 @@ export function RoomHeader({
         </button>
 
         <div className="min-w-0 flex-1">
-          <span
-            className="font-display text-sm font-bold tracking-[-0.04em]"
-            style={{ color: accent }}
-          >
-            DiMovie
-          </span>
+          <DiMovieLogo
+            markClassName="size-6"
+            wordmarkClassName="text-sm sm:text-base"
+            className="gap-1.5"
+            color={accent}
+          />
         </div>
 
         <div className="flex shrink-0 items-center gap-1 sm:gap-2">

@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CinematicShell } from "@/components/layout/cinematic-shell";
+import { DiMovieLogo } from "@/components/brand/dimovie-logo";
 import { toUserMessage } from "@/lib/user-message";
 import { ApiError } from "@/lib/api";
 import {
@@ -61,10 +62,12 @@ export default function RegisterPage() {
       imageAlt="Projector light in a dark theater"
     >
       <div className="space-y-7">
-        <div className="text-center">
-          <p className="font-display text-4xl font-bold tracking-[-0.04em] text-[#e50914]">
-            DiMovie
-          </p>
+        <div className="flex flex-col items-center text-center">
+          <DiMovieLogo
+            className="justify-center"
+            markClassName="size-10"
+            wordmarkClassName="text-3xl sm:text-4xl"
+          />
           <h1 className="mt-3 font-display text-xl font-semibold tracking-[-0.02em] text-white">
             Create your free account
           </h1>

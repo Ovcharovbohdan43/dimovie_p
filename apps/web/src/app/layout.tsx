@@ -23,6 +23,11 @@ export const metadata: Metadata = {
   title: "DiMovie — Watch Together",
   description:
     "Cinema-quality synchronized watch parties with voice chat and ultra-low latency.",
+  icons: {
+    icon: [{ url: "/brand/dimovie-mark.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/brand/dimovie-mark.svg" }],
+  },
+  applicationName: "DiMovie",
 };
 
 export const viewport: Viewport = {

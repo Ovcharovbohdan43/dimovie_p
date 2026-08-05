@@ -41,6 +41,7 @@ import {
 } from "@/components/room/player-live-overlay";
 import { RoomGuestAuthModal } from "@/components/room/room-guest-auth-modal";
 import { RoomPreviewTheater } from "@/components/room/room-preview-theater";
+import { DiMovieLogo, DiMovieMark } from "@/components/brand/dimovie-logo";
 import {
   createSystemChatNotice,
   describeSyncEvent,
@@ -612,9 +613,11 @@ export default function RoomPage({
           aria-hidden
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_35%,rgba(229,9,20,0.12),transparent_55%)]"
         />
-        <p className="relative font-display text-2xl font-bold tracking-[-0.04em] text-[#e50914]">
-          DiMovie
-        </p>
+        <DiMovieLogo
+          className="relative justify-center"
+          markClassName="size-8"
+          wordmarkClassName="text-2xl"
+        />
         <p className="relative text-[#e50914]">
           This room doesn’t exist or the link is no longer valid.
         </p>
@@ -689,9 +692,11 @@ export default function RoomPage({
           aria-hidden
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_35%,rgba(229,9,20,0.12),transparent_55%)]"
         />
-        <p className="relative font-display text-2xl font-bold tracking-[-0.04em] text-[#e50914]">
-          DiMovie
-        </p>
+        <DiMovieLogo
+          className="relative justify-center"
+          markClassName="size-8"
+          wordmarkClassName="text-2xl"
+        />
         <p className="relative text-[#e50914]">
           {joinError ?? "Couldn’t join the room. Check the code and try again."}
         </p>
@@ -892,9 +897,7 @@ export default function RoomPage({
               </div>
             ) : (
               <div className="relative flex flex-col items-center justify-center gap-4 py-20 text-center">
-                <p className="font-display text-3xl font-bold tracking-[-0.04em] text-[#e50914]/80">
-                  DiMovie
-                </p>
+                <DiMovieMark className="size-12 text-[#e50914]/80" />
                 <div>
                   <p className="font-display text-base font-semibold tracking-[-0.01em] text-white/70">
                     Waiting for the host to pick a video

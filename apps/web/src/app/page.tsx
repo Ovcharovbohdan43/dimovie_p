@@ -5,7 +5,7 @@ import type { RoomSummary } from "@dimovie/shared";
 import { HeroBanner } from "@/components/home/hero-banner";
 import { ContentRow } from "@/components/home/content-row";
 import { RoomCard } from "@/components/home/room-card";
-import { ExperienceStory } from "@/components/home/experience-story";
+import { ProductProof } from "@/components/home/product-proof";
 import { SyncStrip } from "@/components/home/sync-strip";
 import { FinalCta } from "@/components/home/final-cta";
 import { useAuth } from "@/hooks/use-auth";
@@ -66,7 +66,7 @@ export default function HomePage() {
           </>
         )}
 
-        <ExperienceStory />
+        <ProductProof />
         <SyncStrip />
         <FinalCta isAuthenticated={!!me.data} />
       </div>
