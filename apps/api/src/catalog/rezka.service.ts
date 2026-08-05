@@ -211,8 +211,16 @@ export class RezkaCatalogService implements OnModuleDestroy {
     { header: string; expiresAt: number }
   >();
 
-  private outboundFetch(url: string, init?: RequestInit) {
-    return this.proxy.fetch(url, init as import('undici').RequestInit);
+  private outboundFetch(
+    url: string,
+    init?: RequestInit,
+    opts?: { viaProxy?: boolean },
+  ) {
+    return this.proxy.fetch(
+      url,
+      init as import('undici').RequestInit,
+      opts,
+    );
   }
 
   async onModuleDestroy() {
@@ -1393,10 +1401,16 @@ export class RezkaCatalogService implements OnModuleDestroy {
       headers['Range'] = range;
     }
 
-    const upstream = await this.outboundFetch(targetUrl, {
-      headers,
-      redirect: 'follow',
-    });
+    // Video bytes go Railway → CDN directly. Residential proxy is only for
+    // catalog HTML / Anubis / ajax (kilobytes), not multi‑GB streams.
+    const upstream = await this.outboundFetch(
+      targetUrl,
+      {
+        headers,
+        redirect: 'follow',
+      },
+      { viaProxy: false },
+    );
 
     if (!upstream.ok && upstream.status !== 206) {
       throw new NotFoundException(`Stream proxy failed (${upstream.status})`);

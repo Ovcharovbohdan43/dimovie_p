@@ -142,8 +142,17 @@ export class RezkaProxyPool {
     return this.agent;
   }
 
-  async fetch(url: string, init: RequestInit = {}) {
-    const dispatcher = this.getAgent();
+  /**
+   * @param viaProxy — catalog HTML/ajax only. Video byte streams should stay
+   *   direct (Railway bandwidth) so a small residential plan is not burned.
+   */
+  async fetch(
+    url: string,
+    init: RequestInit = {},
+    opts: { viaProxy?: boolean } = {},
+  ) {
+    const viaProxy = opts.viaProxy !== false;
+    const dispatcher = viaProxy ? this.getAgent() : undefined;
     if (!dispatcher) {
       return undiciFetch(url, init);
     }
