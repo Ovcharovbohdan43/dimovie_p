@@ -4,6 +4,8 @@ import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-option
 const TRUSTED_HOSTS = new Set([
   'localhost',
   '127.0.0.1',
+  'dimovie.pro',
+  'www.dimovie.pro',
   'dimovie.app',
   'www.dimovie.app',
 ]);
@@ -50,9 +52,9 @@ function collectAllowedOrigins(): Set<string> {
   if (frontend) {
     for (const v of expandOriginVariants(frontend)) allowed.add(v);
   }
-  // Explicit product URL so login works even if Railway env still points at *.railway.app
-  for (const v of expandOriginVariants('https://dimovie.app')) {
-    allowed.add(v);
+  // Explicit product URLs so login works even if Railway env still points at *.railway.app
+  for (const base of ['https://dimovie.pro', 'https://dimovie.app']) {
+    for (const v of expandOriginVariants(base)) allowed.add(v);
   }
   return allowed;
 }

@@ -1,10 +1,10 @@
 export const LEGAL_META = {
   productName: "DiMovie",
   operatorName: "DiMovie",
-  websiteUrl: "https://dimovie.app",
-  supportEmail: "support@dimovie.app",
-  privacyEmail: "privacy@dimovie.app",
-  legalEmail: "legal@dimovie.app",
+  websiteUrl: "https://dimovie.pro",
+  supportEmail: "support@dimovie.pro",
+  privacyEmail: "privacy@dimovie.pro",
+  legalEmail: "legal@dimovie.pro",
   /** ISO date shown on legal pages */
   effectiveDate: "2026-08-05",
   effectiveDateLabel: "August 5, 2026",
