@@ -30,6 +30,8 @@ export const ROOM_INACTIVE_CLEANUP_DAYS = 7;
 
 /** Length of newly generated room codes (existing short codes remain valid). */
 export const ROOM_CODE_LENGTH = 10;
+/** Legacy rooms still use 6-character codes. */
+export const ROOM_CODE_MIN_LENGTH = 6;
 
 export const SECURITY_ERROR_CODES = {
   RATE_LIMITED: "RATE_LIMITED",

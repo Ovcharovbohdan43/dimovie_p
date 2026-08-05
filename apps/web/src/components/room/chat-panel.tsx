@@ -12,6 +12,43 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ChatEmojiPicker } from "@/components/room/chat-emoji-picker";
 import { cn } from "@/lib/utils";
 
+/** Keep mobile chat sheet inside the visible viewport when the keyboard opens. */
+function useMobileChatSheetMetrics(active: boolean) {
+  const [metrics, setMetrics] = useState({ height: 0, bottom: 0 });
+
+  useEffect(() => {
+    if (!active || typeof window === "undefined") return;
+
+    const update = () => {
+      const vv = window.visualViewport;
+      const viewportHeight = vv?.height ?? window.innerHeight;
+      const offsetTop = vv?.offsetTop ?? 0;
+      const keyboardInset = Math.max(
+        0,
+        window.innerHeight - (viewportHeight + offsetTop),
+      );
+      const height = Math.min(
+        viewportHeight * 0.92,
+        Math.max(280, viewportHeight - 8),
+      );
+      setMetrics({ height, bottom: keyboardInset });
+    };
+
+    update();
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", update);
+    vv?.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    return () => {
+      vv?.removeEventListener("resize", update);
+      vv?.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [active]);
+
+  return metrics;
+}
+
 interface ChatPanelProps {
   messages: ChatMessagePayload[];
   onSend: (content: string) => void;
@@ -69,13 +106,18 @@ export function ChatPanel({
   const typingTimer = useRef<number | null>(null);
   const prevCountRef = useRef(messages.length);
 
+  const isMobileSheet = mobileOpen === true;
+  const sheetMetrics = useMobileChatSheetMetrics(isMobileSheet);
+
   const resizeComposer = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "0px";
-    const next = Math.min(el.scrollHeight, 112);
+    // Keep the composer compact on mobile so the send button stays on-screen.
+    const maxHeight = isMobileSheet ? 72 : 112;
+    const next = Math.min(el.scrollHeight, maxHeight);
     el.style.height = `${Math.max(next, 44)}px`;
-  }, []);
+  }, [isMobileSheet]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     const el = scrollRef.current;
@@ -343,7 +385,7 @@ export function ChatPanel({
         )}
       </div>
 
-      <div className="relative z-10 min-w-0 shrink-0 overflow-x-hidden border-t border-white/[0.06] bg-black/20 p-3">
+      <div className="relative z-10 min-w-0 shrink-0 overflow-x-hidden border-t border-white/[0.06] bg-black/30 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <div className="mb-2 flex min-w-0 items-center gap-1">
           <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-hide">
             {CHAT_QUICK_REACTIONS.map((emoji) => (
@@ -379,17 +421,18 @@ export function ChatPanel({
                 ? `Wait ${chatCooldown}s…`
                 : "Send a message…"
             }
-            className="max-h-28 min-h-11 flex-1 resize-none overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2.5 text-sm leading-5 text-white placeholder:text-white/30 outline-none focus-visible:ring-2 focus-visible:ring-white/25 disabled:opacity-50 scrollbar-hide"
+            className="max-h-[4.5rem] min-h-11 flex-1 resize-none overflow-y-auto rounded-2xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2.5 text-base leading-5 text-white placeholder:text-white/30 outline-none focus-visible:ring-2 focus-visible:ring-white/25 disabled:opacity-50 scrollbar-hide sm:max-h-28 sm:text-sm"
             maxLength={CHAT_MAX_LENGTH}
             disabled={chatCooldown > 0}
             aria-label="Message"
+            enterKeyHint="send"
           />
           <button
             type="submit"
             disabled={!input.trim() || chatCooldown > 0}
             aria-label="Send message"
             className={cn(
-              "mb-0.5 flex size-10 shrink-0 items-center justify-center rounded-full transition",
+              "mb-0.5 flex size-11 shrink-0 items-center justify-center rounded-full transition touch-manipulation",
               input.trim() && chatCooldown === 0
                 ? "bg-white text-black hover:bg-white/90"
                 : "bg-white/10 text-white/30",
@@ -402,7 +445,9 @@ export function ChatPanel({
           {chatCooldown > 0 ? (
             <p>Slow down — {chatCooldown}s until you can send again</p>
           ) : (
-            <p className="text-white/25">Enter to send · Shift+Enter for line</p>
+            <p className="hidden text-white/25 sm:block">
+              Enter to send · Shift+Enter for line
+            </p>
           )}
           <p
             className={cn(
@@ -422,6 +467,8 @@ export function ChatPanel({
 
   if (mobileOpen !== undefined) {
     if (!mobileOpen) return null;
+    const sheetHeight =
+      sheetMetrics.height > 0 ? sheetMetrics.height : undefined;
     return (
       <div
         className="fixed inset-0 z-50 lg:hidden"
@@ -433,7 +480,14 @@ export function ChatPanel({
           className="absolute inset-0 bg-black/70 backdrop-blur-sm"
           onClick={onMobileClose}
         />
-        <div className="absolute bottom-0 left-0 right-0 h-[78vh] min-w-0 overflow-hidden overflow-x-hidden rounded-t-[20px] border-t border-white/10 shadow-2xl">
+        <div
+          className="absolute left-0 right-0 min-w-0 overflow-hidden overflow-x-hidden rounded-t-[20px] border-t border-white/10 bg-[#0a0a0f] shadow-2xl"
+          style={{
+            height: sheetHeight ? `${sheetHeight}px` : "min(92dvh, 100%)",
+            bottom: sheetMetrics.bottom,
+            maxHeight: "100dvh",
+          }}
+        >
           {panel}
         </div>
       </div>

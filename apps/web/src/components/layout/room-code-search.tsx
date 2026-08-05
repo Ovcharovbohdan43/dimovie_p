@@ -3,13 +3,15 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
+import { ROOM_CODE_LENGTH, ROOM_CODE_MIN_LENGTH } from "@dimovie/shared";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-const ROOM_CODE_LENGTH = 6;
-
 function normalizeRoomCode(value: string) {
-  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, ROOM_CODE_LENGTH);
+  return value
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, ROOM_CODE_LENGTH);
 }
 
 interface RoomCodeSearchProps {
@@ -17,7 +19,10 @@ interface RoomCodeSearchProps {
   compact?: boolean;
 }
 
-export function RoomCodeSearch({ className, compact = false }: RoomCodeSearchProps) {
+export function RoomCodeSearch({
+  className,
+  compact = false,
+}: RoomCodeSearchProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
@@ -25,17 +30,36 @@ export function RoomCodeSearch({ className, compact = false }: RoomCodeSearchPro
 
   const submit = () => {
     const normalized = normalizeRoomCode(code);
-    if (normalized.length !== ROOM_CODE_LENGTH) {
-      setError(`Enter a ${ROOM_CODE_LENGTH}-character room code`);
+    if (
+      normalized.length < ROOM_CODE_MIN_LENGTH ||
+      normalized.length > ROOM_CODE_LENGTH
+    ) {
+      setError(
+        `Enter a ${ROOM_CODE_MIN_LENGTH}–${ROOM_CODE_LENGTH} character room code`,
+      );
       return;
     }
     setError(null);
+    setOpen(false);
     router.push(`/room/${normalized}`);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     submit();
+  };
+
+  const inputProps = {
+    value: code,
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+      setCode(normalizeRoomCode(e.target.value));
+      setError(null);
+    },
+    maxLength: ROOM_CODE_LENGTH,
+    inputMode: "text" as const,
+    autoCapitalize: "characters" as const,
+    autoCorrect: "off" as const,
+    spellCheck: false,
   };
 
   if (compact) {
@@ -63,21 +87,13 @@ export function RoomCodeSearch({ className, compact = false }: RoomCodeSearchPro
             />
             <form
               onSubmit={handleSubmit}
-              className="fixed left-3 right-3 top-[3.75rem] z-50 rounded-lg border border-white/10 bg-[#181818] p-3 shadow-xl sm:left-auto sm:right-4 sm:w-72"
+              className="fixed left-3 right-3 top-[3.75rem] z-50 rounded-lg border border-white/10 bg-[#181818] p-3 shadow-xl sm:left-auto sm:right-4 sm:w-80"
             >
               <Input
-                value={code}
-                onChange={(e) => {
-                  setCode(normalizeRoomCode(e.target.value));
-                  setError(null);
-                }}
+                {...inputProps}
                 placeholder="Room code"
-                className="h-10 w-full border-white/10 bg-white/5 uppercase tracking-widest"
+                className="h-11 w-full border-white/10 bg-white/5 text-base uppercase tracking-widest"
                 autoFocus
-                maxLength={ROOM_CODE_LENGTH}
-                inputMode="text"
-                autoCapitalize="characters"
-                autoCorrect="off"
               />
               {error && (
                 <p className="mt-2 text-xs text-[#e50914]">{error}</p>
@@ -96,14 +112,9 @@ export function RoomCodeSearch({ className, compact = false }: RoomCodeSearchPro
     >
       <Search className="pointer-events-none absolute left-3 size-4 text-white/40" />
       <Input
-        value={code}
-        onChange={(e) => {
-          setCode(normalizeRoomCode(e.target.value));
-          setError(null);
-        }}
+        {...inputProps}
         placeholder="Search by room code..."
-        className="h-9 w-44 border-white/10 bg-white/5 pl-9 uppercase tracking-widest placeholder:normal-case placeholder:tracking-normal lg:w-52"
-        maxLength={ROOM_CODE_LENGTH}
+        className="h-9 w-52 border-white/10 bg-white/5 pl-9 text-sm uppercase tracking-widest placeholder:normal-case placeholder:tracking-normal lg:w-60"
         aria-label="Search by room code"
       />
       {error && (

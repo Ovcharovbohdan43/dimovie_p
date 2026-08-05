@@ -69,7 +69,8 @@ export default function RoomPage({
 }: {
   params: Promise<{ code: string }>;
 }) {
-  const { code } = use(params);
+  const { code: rawCode } = use(params);
+  const code = rawCode.toUpperCase();
   const router = useRouter();
   const { me, authReady, hasToken, isAuthenticated } = useAuth();
   const [syncState, setSyncState] = useState<SyncStatePayload | null>(null);
@@ -453,15 +454,22 @@ export default function RoomPage({
   });
 
   useEffect(() => {
-    if (!hasJoined) {
-      setWatchSeconds(0);
-      return;
+    if (!hasJoined || typeof window === "undefined") return;
+    const key = `dimovie_session_started:${code.toUpperCase()}`;
+    let startedAt = Number(sessionStorage.getItem(key));
+    if (!Number.isFinite(startedAt) || startedAt <= 0) {
+      startedAt = Date.now();
+      sessionStorage.setItem(key, String(startedAt));
     }
-    const timer = window.setInterval(() => {
-      setWatchSeconds((s) => s + 1);
-    }, 1000);
+    const tick = () => {
+      setWatchSeconds(
+        Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
+      );
+    };
+    tick();
+    const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
-  }, [hasJoined]);
+  }, [hasJoined, code]);
   const handleSendChat = useCallback(
     (content: string) => {
       const user = me.data;
