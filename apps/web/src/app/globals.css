@@ -103,6 +103,7 @@
     @apply font-sans scroll-smooth;
     caret-color: transparent;
     color-scheme: dark;
+    scrollbar-gutter: stable;
   }
   body {
     @apply text-foreground antialiased;
@@ -113,7 +114,7 @@
     background-color: #050508;
     background-image:
       radial-gradient(ellipse 90% 55% at 50% -10%, rgba(90, 100, 140, 0.14), transparent 55%),
-      radial-gradient(ellipse 50% 40% at 100% 20%, rgba(229, 9, 20, 0.06), transparent 50%),
+      radial-gradient(ellipse 45% 38% at 12% 18%, rgba(229, 9, 20, 0.07), transparent 55%),
       linear-gradient(180deg, #0a0a10 0%, #050508 42%, #030306 100%);
     background-attachment: fixed;
   }
@@ -127,6 +128,39 @@
     opacity: 0.035;
     mix-blend-mode: overlay;
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  @keyframes dm-hero-enter {
+    from {
+      opacity: 0;
+      transform: translateY(1.25rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .dm-hero-enter {
+    animation: dm-hero-enter 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .dm-hero-enter-delay-1 {
+    animation-delay: 0.1s;
+  }
+
+  .dm-hero-enter-delay-2 {
+    animation-delay: 0.18s;
+  }
+
+  .dm-hero-enter-delay-3 {
+    animation-delay: 0.26s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dm-hero-enter {
+      animation: none;
+    }
   }
 
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]),

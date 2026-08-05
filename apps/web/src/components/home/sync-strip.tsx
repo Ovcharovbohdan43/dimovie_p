@@ -24,7 +24,7 @@ export function SyncStrip() {
   const reduceMotion = useReducedMotion();
 
   return (
-    <section className="relative px-4 py-12 sm:px-6 sm:py-16 md:px-10 md:py-24 lg:px-14">
+    <section className="relative mx-auto max-w-[1920px] px-4 py-12 sm:px-6 sm:py-16 md:px-10 md:py-24 lg:px-14">
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
       <motion.div
         className="mx-auto max-w-5xl text-center"

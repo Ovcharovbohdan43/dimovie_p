@@ -14,7 +14,7 @@ export function FinalCta({ isAuthenticated }: FinalCtaProps) {
   const reduceMotion = useReducedMotion();
 
   return (
-    <section className="relative overflow-hidden px-4 py-20 sm:px-6 md:px-10 md:py-28 lg:px-14">
+    <section className="relative mx-auto max-w-[1920px] overflow-hidden px-4 py-20 sm:px-6 md:px-10 md:py-28 lg:px-14">
       <div
         aria-hidden
         className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(229,9,20,0.18),transparent_55%),radial-gradient(ellipse_at_80%_100%,rgba(0,168,225,0.1),transparent_45%)]"

@@ -33,7 +33,7 @@ export function ProductProof() {
   const reduceMotion = useReducedMotion();
 
   return (
-    <section className="relative px-4 py-8 sm:px-6 md:px-10 md:py-12 lg:px-14">
+    <section className="relative mx-auto max-w-[1920px] px-4 py-8 sm:px-6 md:px-10 md:py-12 lg:px-14">
       <motion.div
         className="max-w-2xl"
         initial={reduceMotion ? false : { opacity: 0, y: 22 }}
@@ -55,17 +55,18 @@ export function ProductProof() {
 
       <div className="mt-10 space-y-14 sm:mt-12 md:mt-16 md:space-y-24">
         {beats.map((beat, i) => {
-          const reverse = i % 2 === 1;
+          // Even: copy left / media right. Odd: media left / copy right.
+          const mediaFirst = i % 2 === 1;
           return (
             <article
               key={beat.title}
-              className="grid items-center gap-5 sm:gap-6 md:grid-cols-12 md:gap-10"
+              className="grid items-center gap-5 sm:gap-6 md:grid-cols-12 md:gap-10 lg:gap-14"
             >
               <div
                 className={
-                  reverse
-                    ? "md:col-span-7 md:col-start-6 md:row-start-1"
-                    : "md:col-span-7"
+                  mediaFirst
+                    ? "order-1 md:col-span-7 md:col-start-1 md:row-start-1"
+                    : "order-2 md:order-none md:col-span-7 md:col-start-6 md:row-start-1"
                 }
               >
                 <div className="relative aspect-[16/11] overflow-hidden rounded-[4px] sm:aspect-[16/10] md:aspect-[16/9]">
@@ -74,14 +75,14 @@ export function ProductProof() {
                     alt={beat.alt}
                     fill
                     sizes="(max-width: 768px) 100vw, 58vw"
-                    className="object-cover object-top"
+                    className="object-cover object-left-top"
                   />
                   <div
                     aria-hidden
                     className={
-                      reverse
-                        ? "pointer-events-none absolute inset-0 bg-[linear-gradient(270deg,rgba(8,8,12,0.55)_0%,transparent_38%)]"
-                        : "pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(8,8,12,0.55)_0%,transparent_38%)]"
+                      mediaFirst
+                        ? "pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(8,8,12,0.45)_0%,transparent_40%)]"
+                        : "pointer-events-none absolute inset-0 bg-[linear-gradient(270deg,rgba(8,8,12,0.45)_0%,transparent_40%)]"
                     }
                   />
                 </div>
@@ -89,9 +90,9 @@ export function ProductProof() {
 
               <div
                 className={
-                  reverse
-                    ? "md:col-span-4 md:col-start-1 md:row-start-1"
-                    : "md:col-span-4 md:col-start-9"
+                  mediaFirst
+                    ? "order-2 md:col-span-4 md:col-start-9 md:row-start-1"
+                    : "order-1 md:order-none md:col-span-4 md:col-start-1 md:row-start-1"
                 }
               >
                 <RevealEyebrow className="font-display text-sm font-semibold tracking-[0.18em] text-[#e50914]">

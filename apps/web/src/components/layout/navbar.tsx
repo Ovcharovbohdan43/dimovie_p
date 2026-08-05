@@ -48,7 +48,7 @@ export function Navbar() {
           : "border-b border-transparent bg-gradient-to-b from-black/75 to-transparent",
       )}
     >
-      <div className="mx-auto flex h-14 max-w-[1920px] items-center justify-between gap-2 px-3 sm:h-16 sm:gap-3 sm:px-6 md:px-10 lg:px-14">
+      <div className="mx-auto flex h-14 max-w-[1920px] items-center justify-between gap-2 px-4 sm:h-16 sm:gap-3 sm:px-6 md:px-10 lg:px-14">
         <div className="flex min-w-0 items-center gap-4 md:gap-8">
           <Link href="/" className="min-w-0 shrink-0" aria-label="DiMovie home">
             <DiMovieLogo
