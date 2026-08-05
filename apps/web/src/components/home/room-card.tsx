@@ -9,7 +9,7 @@ import {
 } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import type { RoomSummary } from "@dimovie/shared";
 import { getVideoPreview } from "@dimovie/shared";
 import { cn } from "@/lib/utils";
@@ -20,7 +20,10 @@ interface RoomCardProps {
   className?: string;
 }
 
-const DESC_CLAMP_LINES = 2;
+/** Collapsed description = 2 lines of text-xs leading-relaxed + More row. */
+const DESC_TEXT_H = "h-[2.625rem]"; // 2 × 1.3125rem
+const DESC_ACTION_H = "h-5"; // More / spacer
+const DESC_SLOT_H = "h-[3.75rem]"; // text + gap + action
 
 function getRoomPreview(room: RoomSummary) {
   const meta = room.videoSource?.metadata as
@@ -44,12 +47,12 @@ function privacyLabel(privacy: string) {
   return "Private";
 }
 
-function DescriptionBlock({
+function DescriptionSlot({
   text,
   expanded,
   onToggle,
 }: {
-  text: string;
+  text: string | null;
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -58,21 +61,21 @@ function DescriptionBlock({
 
   const measure = useCallback(() => {
     const el = measureRef.current;
-    if (!el) return;
-    const wasClamped = el.classList.contains("line-clamp-2");
+    if (!el || !text) {
+      setNeedsMore(false);
+      return;
+    }
     el.classList.remove("line-clamp-2");
     const fullHeight = el.scrollHeight;
     el.classList.add("line-clamp-2");
     const clampedHeight = el.clientHeight;
-    if (!wasClamped && expanded) {
-      el.classList.remove("line-clamp-2");
-    }
+    if (expanded) el.classList.remove("line-clamp-2");
     setNeedsMore(fullHeight > clampedHeight + 1);
-  }, [expanded]);
+  }, [text, expanded]);
 
   useLayoutEffect(() => {
     measure();
-  }, [text, measure]);
+  }, [measure]);
 
   useEffect(() => {
     const el = measureRef.current;
@@ -83,49 +86,52 @@ function DescriptionBlock({
   }, [measure]);
 
   return (
-    <div className="flex min-h-[3.25rem] flex-col">
-      <motion.div
-        initial={false}
-        animate={{
-          height: expanded ? "auto" : `${DESC_CLAMP_LINES * 1.625}rem`,
-        }}
-        transition={{ type: "spring", stiffness: 380, damping: 32, mass: 0.7 }}
-        className="overflow-hidden"
+    <div
+      className={cn(
+        "flex w-full flex-col gap-1.5",
+        expanded ? "min-h-[3.75rem]" : DESC_SLOT_H,
+      )}
+    >
+      <div
+        className={cn(
+          "overflow-hidden",
+          expanded ? "h-auto" : DESC_TEXT_H,
+        )}
       >
-        <p
-          ref={measureRef}
-          className={cn(
-            "text-xs leading-relaxed text-white/55",
-            !expanded && "line-clamp-2",
-          )}
-        >
-          {text}
-        </p>
-      </motion.div>
+        {text ? (
+          <p
+            ref={measureRef}
+            className={cn(
+              "text-xs leading-relaxed text-white/55",
+              !expanded && "line-clamp-2",
+            )}
+          >
+            {text}
+          </p>
+        ) : (
+          <p className="text-xs leading-relaxed text-transparent" aria-hidden>
+            &nbsp;
+            <br />
+            &nbsp;
+          </p>
+        )}
+      </div>
 
-      <AnimatePresence initial={false}>
-        {needsMore ? (
-          <motion.button
-            key="more"
+      <div className={cn("flex items-center", DESC_ACTION_H)}>
+        {text && needsMore ? (
+          <button
             type="button"
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.18 }}
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
               onToggle();
             }}
-            className="mt-1.5 self-start text-[11px] font-semibold tracking-[-0.01em] text-[#9ec9ea] transition hover:text-white"
+            className="text-[11px] font-semibold tracking-[-0.01em] text-[#9ec9ea] transition hover:text-white"
           >
             {expanded ? "Show less" : "More"}
-          </motion.button>
-        ) : (
-          // Reserve space so cards without a long description stay the same height.
-          <span className="mt-1.5 block h-[1.125rem]" aria-hidden />
-        )}
-      </AnimatePresence>
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -134,6 +140,7 @@ export function RoomCard({ room, className }: RoomCardProps) {
   const { title, thumbnail } = getRoomPreview(room);
   const hasVideo = !!room.videoSource?.url;
   const isLive = hasVideo && room.participantCount > 0;
+  const description = room.description?.trim() || null;
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -141,7 +148,9 @@ export function RoomCard({ room, className }: RoomCardProps) {
       layout
       className={cn(
         "w-[72vw] max-w-[300px] flex-shrink-0 snap-start self-start sm:w-[260px] md:w-[280px] lg:w-[300px]",
-        expanded && "relative z-20",
+        // Fixed collapsed height so empty / filled cards align.
+        !expanded && "h-[338px]",
+        expanded && "relative z-20 min-h-[338px]",
         className,
       )}
       whileHover={{ y: expanded ? 0 : -4 }}
@@ -152,7 +161,7 @@ export function RoomCard({ room, className }: RoomCardProps) {
     >
       <Link
         href={`/room/${room.roomCode}`}
-        className="dm-card group relative flex h-full min-h-[318px] flex-col outline-none ring-offset-2 ring-offset-[#050508] focus-visible:ring-2 focus-visible:ring-white/40"
+        className="dm-card group relative flex h-full flex-col outline-none ring-offset-2 ring-offset-[#050508] focus-visible:ring-2 focus-visible:ring-white/40"
       >
         <div className="relative aspect-video w-full shrink-0 overflow-hidden bg-[#1a1a22]">
           {thumbnail ? (
@@ -195,29 +204,23 @@ export function RoomCard({ room, className }: RoomCardProps) {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col gap-2 px-4 py-4">
-          <h3 className="line-clamp-1 min-h-[1.35rem] font-sans text-[15px] font-semibold tracking-[-0.02em] text-white">
+        <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 py-4">
+          <h3 className="line-clamp-1 h-[1.35rem] font-sans text-[15px] font-semibold tracking-[-0.02em] text-white">
             {title}
           </h3>
-          <p className="min-h-[1rem] text-xs text-white/45">
+          <p className="h-4 truncate text-xs text-white/45">
             {room.owner.displayName}
             <span className="mx-1.5 text-white/20">·</span>
             {room.participantCount} watching
           </p>
 
-          {room.description?.trim() ? (
-            <DescriptionBlock
-              text={room.description.trim()}
+          <div className="mt-auto">
+            <DescriptionSlot
+              text={description}
               expanded={expanded}
               onToggle={() => setExpanded((v) => !v)}
             />
-          ) : (
-            // Keep empty-description cards the same footprint.
-            <div className="min-h-[3.25rem]" aria-hidden>
-              <div className="h-[2.5rem]" />
-              <span className="mt-1.5 block h-[1.125rem]" />
-            </div>
-          )}
+          </div>
         </div>
       </Link>
     </motion.div>
