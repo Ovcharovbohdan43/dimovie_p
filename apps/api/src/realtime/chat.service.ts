@@ -12,6 +12,8 @@ import {
   CHAT_SHADOW_BAN_SEC,
   CHAT_SHADOW_VIOLATIONS,
   CHAT_VIOLATIONS_WINDOW_SEC,
+  REACTION_MIN_INTERVAL_MS,
+  isValidReactionEmoji,
 } from '@dimovie/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
@@ -192,11 +194,43 @@ export class ChatService {
     if (!room) return null;
     if (room.ownerId !== requesterId) return null;
 
+    const existing = await this.prisma.message.findFirst({
+      where: { id: messageId, roomId, deletedAt: null },
+    });
+    if (!existing) return null;
+
     await this.prisma.message.update({
       where: { id: messageId },
       data: { deletedAt: new Date() },
     });
 
+    // Drop hot cache so joiners never hydrate a soft-deleted message.
+    await this.redis.client.del(`room:${room.roomCode}:chat:recent`);
+
     return { messageId, roomId };
+  }
+
+  /**
+   * Validate emoji payload and enforce a short per-user cooldown.
+   * Returns the sanitized emoji or null when the reaction should be dropped.
+   */
+  async acceptReaction(userId: string, emoji: string): Promise<string | null> {
+    if (!isValidReactionEmoji(emoji)) return null;
+
+    const lastKey = `reaction:last:${userId}`;
+    const now = Date.now();
+    const lastRaw = await this.redis.client.get(lastKey);
+    const lastMs = lastRaw ? Number(lastRaw) : 0;
+    if (lastMs > 0 && now - lastMs < REACTION_MIN_INTERVAL_MS) {
+      return null;
+    }
+
+    await this.redis.client.set(
+      lastKey,
+      String(now),
+      'EX',
+      Math.ceil(REACTION_MIN_INTERVAL_MS / 1000) + 2,
+    );
+    return emoji.trim();
   }
 }

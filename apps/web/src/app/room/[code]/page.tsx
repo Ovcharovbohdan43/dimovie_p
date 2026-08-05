@@ -40,11 +40,16 @@ import {
 } from "@/components/room/player-live-overlay";
 import { RoomGuestAuthModal } from "@/components/room/room-guest-auth-modal";
 import { RoomPreviewTheater } from "@/components/room/room-preview-theater";
-import { toUserMessage } from "@/lib/user-message";
 import {
   createSystemChatNotice,
   describeSyncEvent,
 } from "@/lib/system-chat";
+import {
+  mergeChatOnReconnect,
+  markPendingChatFailed,
+  upsertIncomingChat,
+} from "@/lib/chat-state";
+import { toUserMessage } from "@/lib/user-message";
 function applyRoomVideo(
   room: RoomSummary | undefined,
   setVideoUrl: (url: string) => void,
@@ -84,9 +89,10 @@ export default function RoomPage({
   const [endedMessage, setEndedMessage] = useState("The host ended the stream");
   const [typingNames, setTypingNames] = useState<string[]>([]);
   const [watchSeconds, setWatchSeconds] = useState(0);
-  const prevParticipantsRef = useRef<Set<string>>(new Set());
+  const prevParticipantsRef = useRef<Map<string, string>>(new Map());
   const prevSyncRef = useRef<SyncStatePayload | null>(null);
   const typingClearRef = useRef<Map<string, number>>(new Map());
+  const [chatNotice, setChatNotice] = useState<string | null>(null);
   const token = typeof window !== "undefined" ? getToken() ?? "" : "";
   const queryClient = useQueryClient();
   const preview = useQuery({
@@ -233,20 +239,7 @@ export default function RoomPage({
 
   const handleChat = useCallback((msg: ChatMessagePayload) => {
     const isOptimistic = msg.id.startsWith("opt-");
-    setMessages((prev) => {
-      if (prev.some((m) => m.id === msg.id)) return prev;
-      const withoutDupOpt = isOptimistic
-        ? prev
-        : prev.filter(
-            (m) =>
-              !(
-                m.id.startsWith("opt-") &&
-                m.userId === msg.userId &&
-                m.content === msg.content
-              ),
-          );
-      return [...withoutDupOpt, msg];
-    });
+    setMessages((prev) => upsertIncomingChat(prev, msg));
     if (msg.kind === "system") return;
 
     const overlayId = `comment-${msg.id}`;
@@ -278,19 +271,40 @@ export default function RoomPage({
     }, 5500);
   }, []);
 
+  const handleChatDelete = useCallback(
+    (payload: { messageId: string }) => {
+      setMessages((prev) => prev.filter((m) => m.id !== payload.messageId));
+      setPlayerComments((prev) =>
+        prev.filter((c) => c.id !== `comment-${payload.messageId}`),
+      );
+    },
+    [],
+  );
+
+  const failPendingChat = useCallback(
+    (notice?: string) => {
+      setMessages((prev) => markPendingChatFailed(prev, me.data?.id));
+      if (notice) {
+        setChatNotice(toUserMessage(notice));
+        window.setTimeout(() => setChatNotice(null), 4000);
+      }
+    },
+    [me.data?.id],
+  );
+
   const handleParticipants = useCallback(
     (p: RoomParticipant[]) => {
       const prev = prevParticipantsRef.current;
-      const next = new Set(p.map((x) => x.userId));
+      const next = new Map(p.map((x) => [x.userId, x.displayName]));
       if (prev.size > 0) {
         for (const person of p) {
           if (!prev.has(person.userId) && person.userId !== me.data?.id) {
             pushSystemNotice(`${person.displayName} joined the room`);
           }
         }
-        for (const id of prev) {
+        for (const [id, name] of prev) {
           if (!next.has(id) && id !== me.data?.id) {
-            // name may be gone — skip leave notices without name
+            pushSystemNotice(`${name} left the room`);
           }
         }
       }
@@ -330,9 +344,9 @@ export default function RoomPage({
   );
   const handleJoined = useCallback(
     (payload: { recentChat: ChatMessagePayload[] }) => {
-      if (payload.recentChat?.length) {
-        setMessages(payload.recentChat);
-      }
+      setMessages((prev) =>
+        mergeChatOnReconnect(prev, payload.recentChat ?? []),
+      );
     },
     [],
   );
@@ -366,6 +380,7 @@ export default function RoomPage({
     sendChat,
     sendReaction,
     sendTyping,
+    deleteChat,
     chatCooldown,
   } = useRoomSocket({
     roomCode: code,
@@ -373,12 +388,15 @@ export default function RoomPage({
     enabled: hasJoined && !!token && isAuthenticated,
     onSyncState: handleSyncState,
     onChatMessage: handleChat,
+    onChatDelete: handleChatDelete,
     onParticipants: handleParticipants,
     onReaction: handleReaction,
     onJoined: handleJoined,
     onRemoved: handleRemoved,
     onRoomClosed: handleRoomClosed,
     onTyping: handleTyping,
+    onChatCooldown: () => failPendingChat(),
+    onChatError: (message) => failPendingChat(message),
   });
 
   useEffect(() => {
@@ -397,6 +415,20 @@ export default function RoomPage({
       if (!user) return;
       const text = content.trim().slice(0, CHAT_MAX_LENGTH);
       if (!text) return;
+
+      // Drop a previous failed optimistic with the same text before retry.
+      setMessages((prev) =>
+        prev.filter(
+          (m) =>
+            !(
+              m.id.startsWith("opt-") &&
+              m.userId === user.id &&
+              m.content === text &&
+              m.status === "failed"
+            ),
+        ),
+      );
+
       const optimistic: ChatMessagePayload = {
         id: `opt-${crypto.randomUUID()}`,
         roomId: room.data?.id ?? code,
@@ -404,17 +436,41 @@ export default function RoomPage({
         displayName: user.displayName,
         content: text,
         createdAt: new Date().toISOString(),
+        status: "pending",
       };
       handleChat(optimistic);
       const sent = sendChat(text);
       if (!sent) {
-        setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === optimistic.id ? { ...m, status: "failed" } : m,
+          ),
+        );
         setPlayerComments((prev) =>
           prev.filter((c) => c.id !== `comment-${optimistic.id}`),
         );
       }
     },
     [me.data, room.data?.id, code, handleChat, sendChat],
+  );
+
+  const handleRetryChat = useCallback(
+    (content: string) => {
+      handleSendChat(content);
+    },
+    [handleSendChat],
+  );
+
+  const handleDeleteChat = useCallback(
+    (messageId: string) => {
+      deleteChat(messageId);
+      handleChatDelete({ messageId });
+    },
+    [deleteChat, handleChatDelete],
+  );
+
+  const avatarByUserId = Object.fromEntries(
+    participants.map((p) => [p.userId, p.avatarUrl]),
   );
   const handleIntent = useCallback(
     (event: "PLAY" | "PAUSE" | "SEEK", time: number) => {
@@ -444,7 +500,11 @@ export default function RoomPage({
     const fresh = messages.slice(seenChatCountRef.current);
     seenChatCountRef.current = messages.length;
     const fromOthers = fresh.filter(
-      (msg) => msg.kind !== "system" && msg.userId !== me.data?.id,
+      (msg) =>
+        msg.kind !== "system" &&
+        msg.userId !== me.data?.id &&
+        msg.status !== "pending" &&
+        msg.status !== "failed",
     ).length;
     if (fromOthers > 0) {
       setUnreadChatCount((count) => count + fromOthers);
@@ -726,8 +786,12 @@ export default function RoomPage({
             onSend={handleSendChat}
             onReaction={sendReaction}
             onTyping={sendTyping}
+            onRetry={handleRetryChat}
+            onDelete={isOwner ? handleDeleteChat : undefined}
+            canModerate={isOwner}
             typingNames={typingNames}
             currentUserId={me.data?.id}
+            avatarByUserId={avatarByUserId}
             participantCount={participants.length || 1}
             chatCooldown={chatCooldown}
             className="w-full"
@@ -740,13 +804,25 @@ export default function RoomPage({
         onSend={handleSendChat}
         onReaction={sendReaction}
         onTyping={sendTyping}
+        onRetry={handleRetryChat}
+        onDelete={isOwner ? handleDeleteChat : undefined}
+        canModerate={isOwner}
         typingNames={typingNames}
         currentUserId={me.data?.id}
+        avatarByUserId={avatarByUserId}
         participantCount={participants.length || 1}
         chatCooldown={chatCooldown}
         mobileOpen={chatOpen}
         onMobileClose={() => setChatOpen(false)}
       />
+      {chatNotice && (
+        <div
+          role="status"
+          className="fixed bottom-24 left-1/2 z-50 max-w-[min(90vw,22rem)] -translate-x-1/2 rounded-2xl border border-white/10 bg-[#0e0e14]/95 px-4 py-2.5 text-center text-sm text-white/80 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-md lg:bottom-8"
+        >
+          {chatNotice}
+        </div>
+      )}
       {!chatOpen && hasJoined && (
         <Button
           onClick={() => {
@@ -754,6 +830,11 @@ export default function RoomPage({
             setUnreadChatCount(0);
             seenChatCountRef.current = messages.length;
           }}
+          aria-label={
+            unreadChatCount > 0
+              ? `Open chat, ${unreadChatCount} unread`
+              : "Open chat"
+          }
           className="fixed bottom-5 right-5 z-40 size-14 rounded-2xl bg-white text-black shadow-[0_12px_40px_rgba(0,0,0,0.45)] hover:bg-white/90 lg:hidden"
           size="icon"
         >

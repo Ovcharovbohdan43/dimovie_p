@@ -35,6 +35,8 @@ export class RealtimeGateway
   server!: Server;
 
   private readonly logger = new Logger(RealtimeGateway.name);
+  /** Per-room/user typing emit throttle (socket id not needed — user+room is enough). */
+  private readonly lastTypingAt = new Map<string, number>();
 
   constructor(
     private readonly wsAuth: WsAuthService,
@@ -235,6 +237,12 @@ export class RealtimeGateway
   @SubscribeMessage(WS_ROOM_EVENTS.CHAT_TYPING)
   onChatTyping(@ConnectedSocket() client: AuthedSocket) {
     if (!client.roomCode || !client.user) return;
+    const key = `${client.roomCode}:${client.user.id}`;
+    const now = Date.now();
+    const last = this.lastTypingAt.get(key) ?? 0;
+    if (now - last < 1000) return;
+    this.lastTypingAt.set(key, now);
+
     client.to(`room:${client.roomCode}`).emit(WS_ROOM_EVENTS.CHAT_TYPING, {
       userId: client.user.id,
       displayName: client.user.displayName,
@@ -246,7 +254,7 @@ export class RealtimeGateway
     @ConnectedSocket() client: AuthedSocket,
     @MessageBody() body: { messageId: string },
   ) {
-    if (!client.roomCode) return;
+    if (!client.roomCode || !client.user) return;
 
     const room = await this.prisma.room.findUnique({
       where: { roomCode: client.roomCode },
@@ -270,7 +278,13 @@ export class RealtimeGateway
     @ConnectedSocket() client: AuthedSocket,
     @MessageBody() body: { emoji: string },
   ) {
-    if (!client.roomCode) return;
+    if (!client.roomCode || !client.user) return;
+
+    const emoji = await this.chatService.acceptReaction(
+      client.user.id,
+      body?.emoji ?? '',
+    );
+    if (!emoji) return;
 
     const room = await this.prisma.room.findUnique({
       where: { roomCode: client.roomCode },
@@ -282,7 +296,7 @@ export class RealtimeGateway
     this.server.to(`room:${client.roomCode}`).emit(WS_ROOM_EVENTS.REACTION, {
       userId: client.user.id,
       displayName: client.user.displayName,
-      emoji: body.emoji,
+      emoji,
       ts: Date.now(),
     });
   }

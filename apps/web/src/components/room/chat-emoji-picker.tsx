@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import { Smile } from "lucide-react";
 import { Theme, EmojiStyle, Categories } from "emoji-picker-react";
 import type { EmojiClickData } from "emoji-picker-react";
+import { CHAT_QUICK_REACTIONS } from "@dimovie/shared";
 import { cn } from "@/lib/utils";
 
 const EmojiPicker = dynamic(() => import("emoji-picker-react"), {
@@ -17,7 +18,6 @@ const EmojiPicker = dynamic(() => import("emoji-picker-react"), {
   ),
 });
 
-const QUICK_REACTIONS = ["😂", "❤️", "🔥", "👏", "😮", "🎬"];
 const PICKER_WIDTH = 288;
 const PICKER_HEIGHT = 360;
 
@@ -158,7 +158,7 @@ export function ChatEmojiPicker({
         {!iconOnly && (
           <>
             <div className="mx-1 h-5 w-px bg-white/10" />
-            {QUICK_REACTIONS.map((emoji) => (
+            {CHAT_QUICK_REACTIONS.map((emoji) => (
               <button
                 key={emoji}
                 type="button"

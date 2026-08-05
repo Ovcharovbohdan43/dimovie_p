@@ -11,6 +11,7 @@ import type {
   SyncStatePayload,
   SyncIntentPayload,
   ChatMessagePayload,
+  ChatDeletePayload,
   RoomParticipant,
 } from "@dimovie/shared";
 import { getRuntimeConfig } from "@/lib/runtime-config";
@@ -35,6 +36,7 @@ interface UseRoomSocketOptions {
   enabled?: boolean;
   onSyncState?: (state: SyncStatePayload) => void;
   onChatMessage?: (msg: ChatMessagePayload) => void;
+  onChatDelete?: (payload: ChatDeletePayload) => void;
   onParticipants?: (participants: Participant[]) => void;
   onReaction?: (data: { userId: string; displayName: string; emoji: string }) => void;
   onJoined?: (payload: JoinedPayload) => void;
@@ -51,6 +53,7 @@ export function useRoomSocket({
   enabled = true,
   onSyncState,
   onChatMessage,
+  onChatDelete,
   onParticipants,
   onReaction,
   onJoined,
@@ -70,6 +73,7 @@ export function useRoomSocket({
 
   const onSyncStateRef = useRef(onSyncState);
   const onChatMessageRef = useRef(onChatMessage);
+  const onChatDeleteRef = useRef(onChatDelete);
   const onParticipantsRef = useRef(onParticipants);
   const onReactionRef = useRef(onReaction);
   const onJoinedRef = useRef(onJoined);
@@ -82,6 +86,7 @@ export function useRoomSocket({
   useEffect(() => {
     onSyncStateRef.current = onSyncState;
     onChatMessageRef.current = onChatMessage;
+    onChatDeleteRef.current = onChatDelete;
     onParticipantsRef.current = onParticipants;
     onReactionRef.current = onReaction;
     onJoinedRef.current = onJoined;
@@ -182,6 +187,10 @@ export function useRoomSocket({
 
       socket.on(WS_ROOM_EVENTS.CHAT_MESSAGE, (msg: ChatMessagePayload) => {
         onChatMessageRef.current?.(msg);
+      });
+
+      socket.on(WS_ROOM_EVENTS.CHAT_DELETE, (payload: ChatDeletePayload) => {
+        onChatDeleteRef.current?.(payload);
       });
 
       socket.on(WS_ROOM_EVENTS.CHAT_COOLDOWN, (payload: { waitSeconds: number }) => {
@@ -291,6 +300,10 @@ export function useRoomSocket({
     socketRef.current?.emit(WS_ROOM_EVENTS.CHAT_TYPING);
   }, []);
 
+  const deleteChat = useCallback((messageId: string) => {
+    socketRef.current?.emit(WS_ROOM_EVENTS.CHAT_DELETE, { messageId });
+  }, []);
+
   return {
     connected: connected && roomJoined,
     reconnecting,
@@ -298,6 +311,7 @@ export function useRoomSocket({
     sendChat,
     sendReaction,
     sendTyping,
+    deleteChat,
     chatCooldown,
   };
 }
