@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { GoogleOAuthStrategy } from './strategies/google.strategy';
 import { DiscordOAuthStrategy } from './strategies/discord.strategy';
+import { SecurityModule } from '../security/security.module';
 
 @Module({
   imports: [
@@ -16,13 +17,22 @@ import { DiscordOAuthStrategy } from './strategies/discord.strategy';
       useFactory: (config: ConfigService) => ({
         secret: config.get<string>('JWT_ACCESS_SECRET'),
         signOptions: {
-          expiresIn: config.get<string>('JWT_ACCESS_TTL', '15m') as `${number}${'s' | 'm' | 'h' | 'd'}`,
+          expiresIn: config.get<string>(
+            'JWT_ACCESS_TTL',
+            '15m',
+          ) as `${number}${'s' | 'm' | 'h' | 'd'}`,
         },
       }),
     }),
+    SecurityModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, GoogleOAuthStrategy, DiscordOAuthStrategy],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    GoogleOAuthStrategy,
+    DiscordOAuthStrategy,
+  ],
   exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

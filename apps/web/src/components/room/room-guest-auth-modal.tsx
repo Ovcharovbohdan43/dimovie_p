@@ -28,12 +28,23 @@ interface RoomGuestAuthModalProps {
   roomCode: string;
   hostName?: string;
   onAuthenticated: () => void | Promise<void>;
+  /** Soft prompt — guest can dismiss and keep watching. */
+  optional?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  title?: string;
+  description?: string;
 }
 
 export function RoomGuestAuthModal({
   roomCode,
   hostName,
   onAuthenticated,
+  optional = false,
+  open = true,
+  onOpenChange,
+  title = "Sign in to watch together",
+  description,
 }: RoomGuestAuthModalProps) {
   const [mode, setMode] = useState<"register" | "login">("register");
   const { login, register: registerUser } = useAuth();
@@ -60,18 +71,21 @@ export function RoomGuestAuthModal({
   const error = login.error ?? registerUser.error;
 
   return (
-    <Dialog open disablePointerDismissal onOpenChange={() => undefined}>
+    <Dialog
+      open={open}
+      onOpenChange={optional ? onOpenChange : () => undefined}
+    >
       <DialogContent
-        showCloseButton={false}
+        showCloseButton={optional}
         className="max-w-md border-white/10 bg-[#0e0e14]/92 text-white backdrop-blur-xl sm:max-w-md"
       >
         <DialogHeader>
           <DialogTitle className="font-display text-xl font-semibold tracking-[-0.02em]">
-            Sign in to watch together
+            {title}
           </DialogTitle>
           <DialogDescription className="text-white/50">
-            Room {roomCode}
-            {hostName ? ` · host ${hostName}` : ""}
+            {description ??
+              `Room ${roomCode}${hostName ? ` · host ${hostName}` : ""}`}
           </DialogDescription>
         </DialogHeader>
 

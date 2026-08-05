@@ -6,6 +6,7 @@ import { MessageCircle } from "lucide-react";
 import type {
   RoomSummary,
   RoomPreview,
+  GuestWatchRoom,
   SyncStatePayload,
   ChatMessagePayload,
   RoomParticipant,
@@ -93,13 +94,46 @@ export default function RoomPage({
   const prevSyncRef = useRef<SyncStatePayload | null>(null);
   const typingClearRef = useRef<Map<string, number>>(new Map());
   const [chatNotice, setChatNotice] = useState<string | null>(null);
+  const [guestPassword, setGuestPassword] = useState<string | undefined>();
+  const [guestUnlocked, setGuestUnlocked] = useState(false);
+  const [authPromptOpen, setAuthPromptOpen] = useState(false);
+  const [authPromptReason, setAuthPromptReason] = useState<
+    "chat" | "voice" | "interact"
+  >("interact");
   const token = typeof window !== "undefined" ? getToken() ?? "" : "";
   const queryClient = useQueryClient();
+  const showSessionCheck =
+    authReady && hasToken && !me.data && (me.isPending || me.isFetching);
+  const isGuestSession = authReady && !isAuthenticated && !showSessionCheck;
+
   const preview = useQuery({
     queryKey: ["room", code, "preview"],
     queryFn: () => publicApi<RoomPreview>(`/rooms/${code}/preview`),
     staleTime: 30_000,
   });
+
+  const guestNeedsPassword = Boolean(preview.data?.requiresPassword);
+  const guestWatchEnabled =
+    isGuestSession &&
+    Boolean(preview.data) &&
+    (!guestNeedsPassword || guestUnlocked);
+
+  const guestWatch = useQuery({
+    queryKey: ["room", code, "watch", guestPassword ?? ""],
+    queryFn: async () => {
+      if (guestPassword) {
+        return publicApi<GuestWatchRoom>(`/rooms/${code}/watch`, {
+          method: "POST",
+          body: JSON.stringify({ password: guestPassword }),
+        });
+      }
+      return publicApi<GuestWatchRoom>(`/rooms/${code}/watch`);
+    },
+    enabled: guestWatchEnabled,
+    staleTime: 15_000,
+    retry: false,
+  });
+
   const room = useQuery({
     queryKey: ["room", code],
     queryFn: () => api<RoomSummary>(`/rooms/${code}`),
@@ -114,6 +148,9 @@ export default function RoomPage({
       return false;
     },
   });
+
+  const activeRoom: RoomSummary | undefined =
+    room.data ?? guestWatch.data?.room;
   const joinRoom = useMutation({
     mutationFn: (password?: string) =>
       api<RoomSummary>(`/rooms/${code}/join`, {
@@ -195,6 +232,18 @@ export default function RoomPage({
       );
     }
   }, [room.data, me.data]);
+
+  useEffect(() => {
+    if (!guestWatch.data?.room || isAuthenticated) return;
+    applyRoomVideo(guestWatch.data.room, setVideoUrl, setShowSetup, false);
+    if (guestWatch.data.syncState) {
+      setSyncState({
+        ...guestWatch.data.syncState,
+        by: guestWatch.data.syncState.by ?? null,
+      });
+    }
+    setHasJoined(true);
+  }, [guestWatch.data, isAuthenticated]);
   useEffect(() => {
     if (!room.data?.videoSource) return;
     const next = getPlayableStreamUrl(room.data);
@@ -385,7 +434,11 @@ export default function RoomPage({
   } = useRoomSocket({
     roomCode: code,
     token,
-    enabled: hasJoined && !!token && isAuthenticated,
+    allowGuest: isGuestSession,
+    guestPassword,
+    enabled:
+      hasJoined &&
+      ((!!token && isAuthenticated) || isGuestSession),
     onSyncState: handleSyncState,
     onChatMessage: handleChat,
     onChatDelete: handleChatDelete,
@@ -478,15 +531,15 @@ export default function RoomPage({
     },
     [sendSyncIntent],
   );
-  const planFeatures = room.data?.planFeatures;
+  const planFeatures = activeRoom?.planFeatures;
   const voice = useVoiceChat({
     roomCode: code,
     token,
     currentUserId: me.data?.id ?? "",
-    enabled: hasJoined && !!token,
+    enabled: hasJoined && !!token && isAuthenticated,
     enhancedAudio: planFeatures?.enhancedVoice ?? false,
   });
-  const isOwner = me.data?.id === room.data?.owner.id;
+  const isOwner = me.data?.id === activeRoom?.owner.id;
   useEffect(() => {
     if (chatOpen) {
       seenChatCountRef.current = messages.length;
@@ -515,24 +568,27 @@ export default function RoomPage({
   // before the participants list syncs (otherwise play stays disabled while Offline).
   const canControlVideo =
     Boolean(isOwner) ||
-    (myRole ? canControlPlayback(myRole) : hasJoined);
+    (isAuthenticated &&
+      (myRole ? canControlPlayback(myRole) : hasJoined));
   const isCatalogRoom =
-    (room.data?.videoSource?.metadata as { provider?: string } | undefined)
+    (activeRoom?.videoSource?.metadata as { provider?: string } | undefined)
       ?.provider === "rezka";
   const needsPassword =
     isAuthenticated &&
     room.data?.privacy === "PASSWORD" &&
     !isOwner &&
     !hasJoined;
-  const showSessionCheck =
-    authReady && hasToken && !me.data && (me.isPending || me.isFetching);
-  const showGuestAuth =
-    authReady && !isAuthenticated && !showSessionCheck;
+  const needsGuestPassword =
+    isGuestSession && guestNeedsPassword && !guestUnlocked;
   const showRoomLoading =
-    isAuthenticated &&
-    !room.data &&
-    (room.isLoading || room.isFetching) &&
-    !room.isError;
+    (isAuthenticated &&
+      !room.data &&
+      (room.isLoading || room.isFetching) &&
+      !room.isError) ||
+    (isGuestSession &&
+      !needsGuestPassword &&
+      guestWatchEnabled &&
+      guestWatch.isLoading);
   if (preview.isLoading) {
     return (
       <LoadingScreen
@@ -563,24 +619,38 @@ export default function RoomPage({
       </div>
     );
   }
-  if (showGuestAuth || showSessionCheck) {
+  if (showSessionCheck) {
     return (
       <div className="relative h-screen overflow-hidden">
         <RoomPreviewTheater preview={preview.data} blurred className="blur-[6px]" />
         <div className="pointer-events-none absolute inset-0 bg-black/50 backdrop-blur-[2px]" />
-        {showSessionCheck ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-            <LoadingSpinner size="md" label="Checking session" />
-            <p className="text-sm text-white/60">Checking session...</p>
-          </div>
-        ) : (
-          <RoomGuestAuthModal
-            roomCode={code}
-            hostName={preview.data.owner.displayName}
-            onAuthenticated={handleAuthenticated}
-          />
-        )}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+          <LoadingSpinner size="md" label="Checking session" />
+          <p className="text-sm text-white/60">Checking session...</p>
+        </div>
       </div>
+    );
+  }
+  if (needsGuestPassword) {
+    return (
+      <RoomPasswordForm
+        roomCode={code}
+        isPending={guestWatch.isFetching}
+        error={
+          guestWatch.isError
+            ? toUserMessage(
+                guestWatch.error instanceof Error
+                  ? guestWatch.error.message
+                  : null,
+              )
+            : joinError
+        }
+        onSubmit={(password) => {
+          setJoinError(null);
+          setGuestPassword(password);
+          setGuestUnlocked(true);
+        }}
+      />
     );
   }
   if (showRoomLoading) {
@@ -626,7 +696,7 @@ export default function RoomPage({
       </div>
     );
   }
-  if (room.isLoading || joinRoom.isPending) {
+  if (isAuthenticated && (room.isLoading || joinRoom.isPending) && !hasJoined) {
     return (
       <LoadingScreen
         message="Entering watch party..."
@@ -634,23 +704,46 @@ export default function RoomPage({
       />
     );
   }
+  if (!activeRoom) {
+    return (
+      <LoadingScreen
+        message="Loading room..."
+        className="h-screen bg-[#08080c]"
+      />
+    );
+  }
   return (
     <div className="dm-app flex h-screen flex-col overflow-hidden overflow-x-hidden">
-      {room.data && (
-        <RoomHeader
-          room={room.data}
-          code={code}
-          isOwner={!!isOwner}
-          onBack={() => router.push("/dashboard")}
-          onCloseRoom={isOwner ? handleCloseRoom : undefined}
-          isClosingRoom={closeRoom.isPending}
-        />
+      <RoomHeader
+        room={activeRoom}
+        code={code}
+        isOwner={!!isOwner}
+        onBack={() => router.push(isGuestSession ? "/" : "/dashboard")}
+        onCloseRoom={isOwner ? handleCloseRoom : undefined}
+        isClosingRoom={closeRoom.isPending}
+      />
+      {isGuestSession && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] bg-black/40 px-3 py-2 sm:px-4">
+          <p className="text-xs text-white/60 sm:text-sm">
+            Watching as guest — sign in to chat, voice, or host.
+          </p>
+          <Button
+            size="sm"
+            className="h-8 rounded-xl bg-white text-xs font-semibold text-black hover:bg-white/90"
+            onClick={() => {
+              setAuthPromptReason("interact");
+              setAuthPromptOpen(true);
+            }}
+          >
+            Sign in
+          </Button>
+        </div>
       )}
       <div className="flex min-h-0 flex-1">
         {/* Main theater column */}
         <div className="flex min-w-0 flex-1 flex-col overflow-y-auto scrollbar-dimovie">
           <div className="relative flex flex-1 flex-col justify-center px-3 py-4 sm:px-4 md:px-6 lg:px-8">
-            {showSetup && isOwner && room.data ? (
+            {showSetup && isOwner && activeRoom ? (
               <div className="relative mx-auto w-full max-w-xl space-y-6">
                 <div className="dm-glass overflow-hidden rounded-[20px]">
                   <div className="border-b border-white/[0.06] px-6 py-5">
@@ -691,17 +784,17 @@ export default function RoomPage({
                   <div className="h-px flex-1 bg-white/10" />
                 </div>
                 <RoomCatalogSetup
-                  roomId={room.data.id}
+                  roomId={activeRoom.id}
                   onSuccess={(data) => {
                     handleCatalogUpdated(data);
                     setShowSetup(false);
                   }}
                 />
               </div>
-            ) : videoUrl && room.data ? (
+            ) : videoUrl && activeRoom ? (
               <div className="relative mx-auto w-full max-w-[1400px]">
                 <RoomMetaBar
-                  room={room.data}
+                  room={activeRoom}
                   participants={participants}
                   participantCount={participants.length || 1}
                   watchSeconds={watchSeconds}
@@ -718,7 +811,9 @@ export default function RoomPage({
                     onIntent={handleIntent}
                     broadcastEnded={broadcastEnded}
                     endedMessage={endedMessage}
-                    onLeave={() => router.push("/dashboard")}
+                    onLeave={() =>
+                      router.push(isGuestSession ? "/" : "/dashboard")
+                    }
                     maxVideoQuality={planFeatures?.maxVideoQuality ?? "1080p"}
                     syncDriftThresholdMs={planFeatures?.syncDriftThresholdMs ?? 1500}
                     canControl={canControlVideo}
@@ -740,11 +835,11 @@ export default function RoomPage({
                 </div>
                 {isOwner && isCatalogRoom && !showSetup && (
                   <HostCatalogControls
-                    room={room.data}
+                    room={activeRoom}
                     onUpdated={handleCatalogUpdated}
                   />
                 )}
-                {hasJoined ? (
+                {hasJoined && isAuthenticated ? (
                   <VoiceDock
                     connected={voice.connected}
                     muted={voice.muted}
@@ -769,6 +864,22 @@ export default function RoomPage({
                     onTogglePeerMute={voice.togglePeerMute}
                     onUnlockAudio={voice.unlockRemoteAudio}
                   />
+                ) : hasJoined && isGuestSession ? (
+                  <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/40 px-4 py-3">
+                    <p className="text-sm text-white/60">
+                      Voice chat needs an account
+                    </p>
+                    <Button
+                      size="sm"
+                      className="rounded-xl bg-[#e50914] text-xs font-semibold hover:bg-[#f40612]"
+                      onClick={() => {
+                        setAuthPromptReason("voice");
+                        setAuthPromptOpen(true);
+                      }}
+                    >
+                      Sign in
+                    </Button>
+                  </div>
                 ) : null}
               </div>
             ) : (
@@ -788,46 +899,65 @@ export default function RoomPage({
               </div>
             )}
           </div>
-          {isOwner && room.data && !showSetup && (
-            <RoomBrandingForm room={room.data} onUpdated={handleCatalogUpdated} />
+          {isOwner && activeRoom && !showSetup && (
+            <RoomBrandingForm room={activeRoom} onUpdated={handleCatalogUpdated} />
           )}
         </div>
         {/* Chat sidebar — desktop */}
         <aside className="hidden min-w-0 shrink-0 overflow-x-hidden border-l border-white/[0.06] lg:flex lg:w-[340px] xl:w-[380px]">
-          <ChatPanel
-            messages={messages}
-            onSend={handleSendChat}
-            onReaction={sendReaction}
-            onTyping={sendTyping}
-            onRetry={handleRetryChat}
-            onDelete={isOwner ? handleDeleteChat : undefined}
-            canModerate={isOwner}
-            typingNames={typingNames}
-            currentUserId={me.data?.id}
-            avatarByUserId={avatarByUserId}
-            participantCount={participants.length || 1}
-            chatCooldown={chatCooldown}
-            className="w-full"
-          />
+          {isGuestSession ? (
+            <div className="flex w-full flex-col items-center justify-center gap-3 bg-[#0a0a0f] px-6 text-center">
+              <p className="text-sm text-white/55">
+                Sign in to send messages and reactions
+              </p>
+              <Button
+                className="rounded-xl bg-[#e50914] font-semibold hover:bg-[#f40612]"
+                onClick={() => {
+                  setAuthPromptReason("chat");
+                  setAuthPromptOpen(true);
+                }}
+              >
+                Sign in to chat
+              </Button>
+            </div>
+          ) : (
+            <ChatPanel
+              messages={messages}
+              onSend={handleSendChat}
+              onReaction={sendReaction}
+              onTyping={sendTyping}
+              onRetry={handleRetryChat}
+              onDelete={isOwner ? handleDeleteChat : undefined}
+              canModerate={isOwner}
+              typingNames={typingNames}
+              currentUserId={me.data?.id}
+              avatarByUserId={avatarByUserId}
+              participantCount={participants.length || 1}
+              chatCooldown={chatCooldown}
+              className="w-full"
+            />
+          )}
         </aside>
       </div>
       {/* Mobile chat sheet */}
-      <ChatPanel
-        messages={messages}
-        onSend={handleSendChat}
-        onReaction={sendReaction}
-        onTyping={sendTyping}
-        onRetry={handleRetryChat}
-        onDelete={isOwner ? handleDeleteChat : undefined}
-        canModerate={isOwner}
-        typingNames={typingNames}
-        currentUserId={me.data?.id}
-        avatarByUserId={avatarByUserId}
-        participantCount={participants.length || 1}
-        chatCooldown={chatCooldown}
-        mobileOpen={chatOpen}
-        onMobileClose={() => setChatOpen(false)}
-      />
+      {!isGuestSession && (
+        <ChatPanel
+          messages={messages}
+          onSend={handleSendChat}
+          onReaction={sendReaction}
+          onTyping={sendTyping}
+          onRetry={handleRetryChat}
+          onDelete={isOwner ? handleDeleteChat : undefined}
+          canModerate={isOwner}
+          typingNames={typingNames}
+          currentUserId={me.data?.id}
+          avatarByUserId={avatarByUserId}
+          participantCount={participants.length || 1}
+          chatCooldown={chatCooldown}
+          mobileOpen={chatOpen}
+          onMobileClose={() => setChatOpen(false)}
+        />
+      )}
       {chatNotice && (
         <div
           role="status"
@@ -836,7 +966,7 @@ export default function RoomPage({
           {chatNotice}
         </div>
       )}
-      {!chatOpen && hasJoined && (
+      {!chatOpen && hasJoined && !isGuestSession && (
         <Button
           onClick={() => {
             setChatOpen(true);
@@ -858,6 +988,27 @@ export default function RoomPage({
             </span>
           )}
         </Button>
+      )}
+      {isGuestSession && (
+        <RoomGuestAuthModal
+          optional
+          open={authPromptOpen}
+          onOpenChange={setAuthPromptOpen}
+          roomCode={code}
+          hostName={activeRoom.owner.displayName}
+          onAuthenticated={async () => {
+            setAuthPromptOpen(false);
+            await handleAuthenticated();
+          }}
+          title={
+            authPromptReason === "chat"
+              ? "Sign in to chat"
+              : authPromptReason === "voice"
+                ? "Sign in for voice"
+                : "Sign in to interact"
+          }
+          description="Watching stays free — an account unlocks chat, voice, and hosting."
+        />
       )}
     </div>
   );

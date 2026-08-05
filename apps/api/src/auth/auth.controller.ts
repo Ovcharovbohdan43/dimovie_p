@@ -26,8 +26,13 @@ export class AuthController {
   ) {}
 
   @Post('register')
-  register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
-    return this.authService.register(dto, res);
+  register(
+    @Body() dto: RegisterDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+    return this.authService.register(dto, res, ip);
   }
 
   @Post('login')

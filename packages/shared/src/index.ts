@@ -7,3 +7,4 @@ export * from "./profile.js";
 export * from "./subscription.js";
 export * from "./video.js";
 export * from "./catalog.js";
+export * from "./security.js";

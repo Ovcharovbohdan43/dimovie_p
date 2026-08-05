@@ -4,11 +4,13 @@ export const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(128),
   displayName: z.string().min(2).max(32),
+  captchaToken: z.string().max(2048).optional(),
 });
 
 export const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  captchaToken: z.string().max(2048).optional(),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;

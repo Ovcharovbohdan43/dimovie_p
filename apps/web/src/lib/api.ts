@@ -29,6 +29,8 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
+    public code?: string,
+    public siteKey?: string | null,
   ) {
     super(message);
     this.name = "ApiError";
@@ -109,12 +111,22 @@ async function fetchApi(
 
 async function readErrorPayload(res: Response): Promise<{
   message?: string | string[];
+  code?: string;
+  siteKey?: string | null;
 }> {
   return res.json().catch(() => ({}));
 }
 
-function throwApiError(res: Response, body: { message?: string | string[] }): never {
-  throw new ApiError(toUserMessage(body.message ?? res.statusText, res.status), res.status);
+function throwApiError(
+  res: Response,
+  body: { message?: string | string[]; code?: string; siteKey?: string | null },
+): never {
+  throw new ApiError(
+    toUserMessage(body.message ?? res.statusText, res.status),
+    res.status,
+    body.code,
+    body.siteKey,
+  );
 }
 
 export async function api<T>(

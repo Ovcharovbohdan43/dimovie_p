@@ -2,19 +2,31 @@
 
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { registerSchema, type RegisterInput } from "@dimovie/shared";
+import {
+  registerSchema,
+  type RegisterInput,
+  SECURITY_ERROR_CODES,
+} from "@dimovie/shared";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CinematicShell } from "@/components/layout/cinematic-shell";
 import { toUserMessage } from "@/lib/user-message";
+import { ApiError } from "@/lib/api";
+import {
+  TurnstileWidget,
+  useSecurityChallenge,
+} from "@/components/security/turnstile-widget";
 
 export default function RegisterPage() {
   const router = useRouter();
   const { register: registerUser } = useAuth();
+  const challenge = useSecurityChallenge();
+  const [forceCaptcha, setForceCaptcha] = useState(false);
   const {
     register,
     handleSubmit,
@@ -23,9 +35,24 @@ export default function RegisterPage() {
     resolver: zodResolver(registerSchema),
   });
 
+  const showCaptcha = forceCaptcha || challenge.captchaRequired;
+
   const onSubmit = async (data: RegisterInput) => {
-    await registerUser.mutateAsync(data);
-    router.push("/dashboard");
+    try {
+      await registerUser.mutateAsync({
+        ...data,
+        captchaToken: challenge.captchaToken ?? undefined,
+      });
+      router.push("/dashboard");
+    } catch (err) {
+      if (
+        err instanceof ApiError &&
+        err.code === SECURITY_ERROR_CODES.CAPTCHA_REQUIRED
+      ) {
+        setForceCaptcha(true);
+        await challenge.refresh();
+      }
+    }
   };
 
   return (
@@ -87,6 +114,13 @@ export default function RegisterPage() {
             )}
           </div>
 
+          {showCaptcha && challenge.siteKey ? (
+            <TurnstileWidget
+              siteKey={challenge.siteKey}
+              onToken={challenge.setCaptchaToken}
+            />
+          ) : null}
+
           {registerUser.error && (
             <p className="text-sm text-[#e50914]">
               {toUserMessage(registerUser.error.message)}
@@ -100,18 +134,6 @@ export default function RegisterPage() {
           >
             {registerUser.isPending ? "Creating..." : "Create Account"}
           </Button>
-
-          <p className="text-center text-xs leading-relaxed text-white/40">
-            By creating an account you agree to our{" "}
-            <Link href="/terms" className="text-[#00a8e1] hover:underline">
-              Terms of Use
-            </Link>{" "}
-            and{" "}
-            <Link href="/privacy" className="text-[#00a8e1] hover:underline">
-              Privacy Policy
-            </Link>
-            .
-          </p>
         </form>
 
         <p className="text-center text-sm text-white/50">

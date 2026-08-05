@@ -1,5 +1,5 @@
-/** Minimum seconds between chat messages for each user. */
-export const CHAT_MIN_INTERVAL_MS = 5000;
+/** Soft client cooldown between chat messages (burst limited server-side). */
+export const CHAT_MIN_INTERVAL_MS = 500;
 
 /** Hard cap on chat message length (characters after trim/sanitize). */
 export const CHAT_MAX_LENGTH = 200;

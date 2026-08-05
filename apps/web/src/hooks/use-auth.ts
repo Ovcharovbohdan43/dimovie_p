@@ -24,7 +24,11 @@ export function useAuth() {
   });
 
   const login = useMutation({
-    mutationFn: (data: { email: string; password: string }) =>
+    mutationFn: (data: {
+      email: string;
+      password: string;
+      captchaToken?: string;
+    }) =>
       api<AuthResponse>("/auth/login", {
         method: "POST",
         body: JSON.stringify(data),
@@ -40,6 +44,7 @@ export function useAuth() {
       email: string;
       password: string;
       displayName: string;
+      captchaToken?: string;
     }) =>
       api<AuthResponse>("/auth/register", {
         method: "POST",

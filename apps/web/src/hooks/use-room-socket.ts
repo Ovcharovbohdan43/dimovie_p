@@ -33,6 +33,9 @@ interface RemovedPayload {
 interface UseRoomSocketOptions {
   roomCode: string;
   token: string;
+  /** Allow anonymous guest watch sockets (no JWT). */
+  allowGuest?: boolean;
+  guestPassword?: string;
   enabled?: boolean;
   onSyncState?: (state: SyncStatePayload) => void;
   onChatMessage?: (msg: ChatMessagePayload) => void;
@@ -50,6 +53,8 @@ interface UseRoomSocketOptions {
 export function useRoomSocket({
   roomCode,
   token,
+  allowGuest = false,
+  guestPassword,
   enabled = true,
   onSyncState,
   onChatMessage,
@@ -119,13 +124,18 @@ export function useRoomSocket({
 
   const emitJoin = useCallback(
     (socket: Socket) => {
-      socket.emit(WS_ROOM_EVENTS.JOIN, { roomCode: roomCode.toUpperCase() });
+      const payload: { roomCode: string; password?: string } = {
+        roomCode: roomCode.toUpperCase(),
+      };
+      if (guestPassword) payload.password = guestPassword;
+      socket.emit(WS_ROOM_EVENTS.JOIN, payload);
     },
-    [roomCode],
+    [roomCode, guestPassword],
   );
 
   useEffect(() => {
-    if (!enabled || !token) {
+    const canConnect = Boolean(token) || allowGuest;
+    if (!enabled || !canConnect) {
       setConnected(false);
       setRoomJoined(false);
       roomJoinedRef.current = false;
@@ -141,7 +151,7 @@ export function useRoomSocket({
 
       socket = io(wsUrl, {
         transports: ["polling", "websocket"],
-        auth: { token },
+        auth: token ? { token } : {},
         withCredentials: true,
         reconnection: true,
         reconnectionAttempts: Infinity,
@@ -266,7 +276,7 @@ export function useRoomSocket({
       setRoomJoined(false);
       roomJoinedRef.current = false;
     };
-  }, [enabled, token, roomCode, emitJoin, applyChatCooldown]);
+  }, [enabled, token, allowGuest, guestPassword, roomCode, emitJoin, applyChatCooldown]);
 
   const sendSyncIntent = useCallback((intent: Omit<SyncIntentPayload, "clientTs">) => {
     socketRef.current?.emit(WS_ROOM_EVENTS.SYNC_INTENT, {

@@ -8,7 +8,15 @@ import { Socket } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
 import type { AuthUser } from '@dimovie/shared';
 
-export type AuthedSocket = Socket & { user: AuthUser; roomCode?: string };
+export type RoomSocket = Socket & {
+  user?: AuthUser;
+  isGuest?: boolean;
+  guestId?: string;
+  roomCode?: string;
+};
+
+/** @deprecated use RoomSocket — kept for voice gateway typing */
+export type AuthedSocket = RoomSocket & { user: AuthUser };
 
 @Injectable()
 export class WsAuthService {
@@ -18,13 +26,17 @@ export class WsAuthService {
     private readonly authService: AuthService,
   ) {}
 
-  async authenticate(socket: Socket): Promise<AuthUser> {
-    const token =
+  extractToken(socket: Socket): string | undefined {
+    return (
       (socket.handshake.auth?.token as string | undefined) ??
       (socket.handshake.headers.authorization?.replace('Bearer ', '') as
         | string
-        | undefined);
+        | undefined)
+    );
+  }
 
+  async authenticate(socket: Socket): Promise<AuthUser> {
+    const token = this.extractToken(socket);
     if (!token) {
       throw new UnauthorizedException('Missing token');
     }
@@ -39,5 +51,16 @@ export class WsAuthService {
     }
 
     return user;
+  }
+
+  /** Optional auth — returns null for guests (no/invalid token). */
+  async tryAuthenticate(socket: Socket): Promise<AuthUser | null> {
+    const token = this.extractToken(socket);
+    if (!token) return null;
+    try {
+      return await this.authenticate(socket);
+    } catch {
+      return null;
+    }
   }
 }

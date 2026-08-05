@@ -8,8 +8,19 @@ import {
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { randomBytes } from 'crypto';
-import type { RoomPrivacy, RoomSummary, AuthUser, RoomBranding, PlanCapabilities } from '@dimovie/shared';
-import { getVideoPreview, getPlanCapabilities } from '@dimovie/shared';
+import type {
+  RoomPrivacy,
+  RoomSummary,
+  AuthUser,
+  RoomBranding,
+  PlanCapabilities,
+  GuestWatchRoom,
+} from '@dimovie/shared';
+import {
+  getVideoPreview,
+  getPlanCapabilities,
+  ROOM_CODE_LENGTH,
+} from '@dimovie/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -21,6 +32,9 @@ import { JoinRoomDto } from './dto/join-room.dto';
 import { UpdateRoomBrandingDto } from './dto/update-room-branding.dto';
 import { RoomPresenceService } from '../realtime/room-presence.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { RateLimitService } from '../security/rate-limit.service';
+import { TrustScoreService } from '../security/trust-score.service';
+import { CaptchaService } from '../security/captcha.service';
 
 @Injectable()
 export class RoomsService {
@@ -33,9 +47,31 @@ export class RoomsService {
     @Inject(forwardRef(() => RoomPresenceService))
     private readonly presence: RoomPresenceService,
     private readonly analytics: AnalyticsService,
+    private readonly rateLimit: RateLimitService,
+    private readonly trust: TrustScoreService,
+    private readonly captcha: CaptchaService,
   ) {}
 
-  async create(user: AuthUser, dto: CreateRoomDto): Promise<RoomSummary> {
+  async create(
+    user: AuthUser,
+    dto: CreateRoomDto,
+    ip = 'unknown',
+  ): Promise<RoomSummary> {
+    const subject = `user:${user.id}`;
+    await this.rateLimit.consumeRoomCreate(user.id);
+    await this.captcha.assertCaptchaIfNeeded({
+      subject,
+      captchaToken: dto.captchaToken,
+      ip,
+      actionLabel: 'room_create',
+    });
+
+    if (await this.trust.isSoftBlocked(subject)) {
+      throw new ForbiddenException(
+        'Unusual activity detected. Wait a bit before creating rooms.',
+      );
+    }
+
     const dbUser = await this.prisma.user.findUnique({ where: { id: user.id } });
     const tier = dbUser?.subscription ?? 'FREE';
     const caps = getPlanCapabilities(tier);
@@ -57,6 +93,7 @@ export class RoomsService {
         ? await argon2.hash(dto.password)
         : null;
 
+    const now = new Date();
     const room = await this.prisma.room.create({
       data: {
         roomCode,
@@ -66,6 +103,7 @@ export class RoomsService {
         maxUsers: Math.min(dto.maxUsers ?? maxUsersAllowed, maxUsersAllowed),
         description: dto.description?.trim() || null,
         rules: dto.privacy === 'PUBLIC' ? dto.rules?.trim() || null : null,
+        lastActivityAt: now,
         participants: {
           create: { userId: user.id, role: 'OWNER' },
         },
@@ -74,9 +112,61 @@ export class RoomsService {
       include: this.roomInclude(),
     });
 
+    await this.trust.record(subject, 'room_create');
+    await this.trust.record(`ip:${ip}`, 'room_create');
     await this.cacheRoomState(room.id, room.roomCode);
     await this.analytics.trackSessionStart(room.id);
     return this.toSummary(room, tier);
+  }
+
+  async touchActivity(roomId: string) {
+    await this.prisma.room.update({
+      where: { id: roomId },
+      data: { lastActivityAt: new Date() },
+    });
+  }
+
+  /**
+   * Guest watch — playable stream without creating a Participant.
+   * Password rooms require the password; interaction still needs an account.
+   */
+  async getGuestWatch(
+    code: string,
+    password?: string,
+  ): Promise<GuestWatchRoom> {
+    const room = await this.prisma.room.findUnique({
+      where: { roomCode: code.toUpperCase() },
+      include: this.roomInclude(),
+    });
+    if (!room || room.status !== 'ACTIVE') {
+      throw new NotFoundException('Room not found');
+    }
+
+    if (room.privacy === 'PASSWORD') {
+      if (!password || !room.passwordHash) {
+        throw new ForbiddenException('Password required');
+      }
+      const valid = await argon2.verify(room.passwordHash, password);
+      if (!valid) throw new ForbiddenException('Invalid password');
+    }
+
+    const summary = this.toSummary(room, room.owner.subscription ?? 'FREE');
+    const syncState = await this.redis.getJson<{
+      isPlaying: boolean;
+      time: number;
+      version: number;
+      playbackRate: number;
+      serverTs: number;
+      by?: string | null;
+    }>(`room:${room.roomCode}:state`);
+
+    await this.touchActivity(room.id);
+
+    return {
+      room: summary,
+      syncState,
+      mode: 'guest',
+    };
   }
 
   async listPublic(): Promise<RoomSummary[]> {
@@ -193,6 +283,7 @@ export class RoomsService {
     );
 
     await this.recordWatchHistory(user.id, summary);
+    await this.touchActivity(room.id);
 
     return summary;
   }
@@ -316,10 +407,11 @@ export class RoomsService {
 
   private async generateUniqueRoomCode(): Promise<string> {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const bytes = randomBytes(6);
+    const length = ROOM_CODE_LENGTH;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const bytes = randomBytes(length);
       let code = '';
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < length; i++) {
         code += chars[bytes[i]! % chars.length];
       }
       const exists = await this.prisma.room.findUnique({

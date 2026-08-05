@@ -116,3 +116,20 @@ export interface RoomPreview {
     provider?: string;
   };
 }
+
+/**
+ * Guest watch payload — playable for open rooms; password rooms unlock via POST.
+ * Guests can watch + receive sync; chat/voice/create require a full account.
+ */
+export interface GuestWatchRoom {
+  room: RoomSummary;
+  syncState: {
+    isPlaying: boolean;
+    time: number;
+    version: number;
+    playbackRate: number;
+    serverTs: number;
+    by?: string | null;
+  } | null;
+  mode: "guest";
+}

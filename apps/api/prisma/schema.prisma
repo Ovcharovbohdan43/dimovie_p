@@ -141,26 +141,28 @@ model RefreshToken {
 }
 
 model Room {
-  id            String          @id @default(cuid())
-  roomCode      String          @unique @map("room_code")
-  ownerId       String          @map("owner_id")
-  owner         User            @relation("RoomOwner", fields: [ownerId], references: [id])
-  createdAt     DateTime        @default(now()) @map("created_at")
-  status        RoomStatus      @default(ACTIVE)
-  privacy       RoomPrivacy     @default(PUBLIC)
-  passwordHash  String?         @map("password_hash")
-  maxUsers      Int             @default(100) @map("max_users")
-  description   String?         @db.VarChar(500)
-  rules         String?         @db.VarChar(1000)
-  videoSource   VideoSource?
-  participants  Participant[]
-  messages      Message[]
-  playbackState PlaybackState?
-  bans          RoomBan[]
-  sessions      RoomSession[]
-  branding      Json?           @map("branding")
+  id             String          @id @default(cuid())
+  roomCode       String          @unique @map("room_code")
+  ownerId        String          @map("owner_id")
+  owner          User            @relation("RoomOwner", fields: [ownerId], references: [id])
+  createdAt      DateTime        @default(now()) @map("created_at")
+  lastActivityAt DateTime        @default(now()) @map("last_activity_at")
+  status         RoomStatus      @default(ACTIVE)
+  privacy        RoomPrivacy     @default(PUBLIC)
+  passwordHash   String?         @map("password_hash")
+  maxUsers       Int             @default(100) @map("max_users")
+  description    String?         @db.VarChar(500)
+  rules          String?         @db.VarChar(1000)
+  videoSource    VideoSource?
+  participants   Participant[]
+  messages       Message[]
+  playbackState  PlaybackState?
+  bans           RoomBan[]
+  sessions       RoomSession[]
+  branding       Json?           @map("branding")
 
   @@index([ownerId])
+  @@index([status, lastActivityAt])
   @@map("rooms")
 }
 

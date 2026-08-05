@@ -9,6 +9,7 @@ import {
   Req,
 } from '@nestjs/common';
 import type { AuthUser } from '@dimovie/shared';
+import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../auth/public.decorator';
 import { RoomsService } from './rooms.service';
@@ -23,8 +24,12 @@ export class RoomsController {
   constructor(private readonly roomsService: RoomsService) {}
 
   @Post()
-  create(@Req() req: { user: AuthUser }, @Body() dto: CreateRoomDto) {
-    return this.roomsService.create(req.user, dto);
+  create(
+    @Req() req: Request & { user: AuthUser },
+    @Body() dto: CreateRoomDto,
+  ) {
+    const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+    return this.roomsService.create(req.user, dto, ip);
   }
 
   @Public()
@@ -42,6 +47,19 @@ export class RoomsController {
   @Get(':code/preview')
   getPreview(@Param('code') code: string) {
     return this.roomsService.getPreviewByCode(code);
+  }
+
+  /** Guest watch — no account required (password rooms need body). */
+  @Public()
+  @Get(':code/watch')
+  getWatch(@Param('code') code: string) {
+    return this.roomsService.getGuestWatch(code);
+  }
+
+  @Public()
+  @Post(':code/watch')
+  unlockWatch(@Param('code') code: string, @Body() dto: JoinRoomDto) {
+    return this.roomsService.getGuestWatch(code, dto.password);
   }
 
   @Get(':code')

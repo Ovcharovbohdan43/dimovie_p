@@ -2,8 +2,6 @@ import {
   Injectable,
   UnauthorizedException,
   ConflictException,
-  HttpException,
-  HttpStatus,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -15,6 +13,9 @@ import { RedisService } from '../redis/redis.service';
 import type { AuthResponse, AuthUser } from '@dimovie/shared';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { RateLimitService } from '../security/rate-limit.service';
+import { TrustScoreService } from '../security/trust-score.service';
+import { CaptchaService } from '../security/captcha.service';
 
 @Injectable()
 export class AuthService {
@@ -23,9 +24,25 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly redis: RedisService,
+    private readonly rateLimit: RateLimitService,
+    private readonly trust: TrustScoreService,
+    private readonly captcha: CaptchaService,
   ) {}
 
-  async register(dto: RegisterDto, res: Response): Promise<AuthResponse> {
+  async register(
+    dto: RegisterDto,
+    res: Response,
+    ip = 'unknown',
+  ): Promise<AuthResponse> {
+    const subject = `ip:${ip}`;
+    await this.rateLimit.consumeRegister(ip);
+    await this.captcha.assertCaptchaIfNeeded({
+      subject,
+      captchaToken: dto.captchaToken,
+      ip,
+      actionLabel: 'register',
+    });
+
     const existing = await this.prisma.user.findUnique({
       where: { email: dto.email.toLowerCase() },
     });
@@ -44,23 +61,25 @@ export class AuthService {
       },
     });
 
+    await this.trust.record(subject, 'auth_ok');
     return this.issueTokens(user, res);
   }
 
   async login(dto: LoginDto, res: Response, ip: string): Promise<AuthResponse> {
-    const rateKey = `ratelimit:auth:${ip}`;
-    const attempts = await this.redis.incrWithExpire(rateKey, 900);
-    if (attempts > 5) {
-      throw new HttpException(
-        'Too many tries. Wait a minute, then try again.',
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
+    const subject = `ip:${ip}`;
+    await this.rateLimit.consumeLogin(ip);
+    await this.captcha.assertCaptchaIfNeeded({
+      subject,
+      captchaToken: dto.captchaToken,
+      ip,
+      actionLabel: 'login',
+    });
 
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email.toLowerCase() },
     });
     if (!user || !user.passwordHash) {
+      await this.trust.record(subject, 'auth_fail');
       throw new UnauthorizedException(
         'Wrong email or password. Check them and try again.',
       );
@@ -68,12 +87,15 @@ export class AuthService {
 
     const valid = await argon2.verify(user.passwordHash, dto.password);
     if (!valid) {
+      await this.trust.record(subject, 'auth_fail');
       throw new UnauthorizedException(
         'Wrong email or password. Check them and try again.',
       );
     }
 
-    await this.redis.client.del(rateKey);
+    await this.rateLimit.clearLogin(ip);
+    await this.trust.record(subject, 'auth_ok');
+    await this.trust.record(`user:${user.id}`, 'auth_ok');
     return this.issueTokens(user, res);
   }
 

@@ -14,21 +14,24 @@ import {
   CHAT_VIOLATIONS_WINDOW_SEC,
   REACTION_MIN_INTERVAL_MS,
   isValidReactionEmoji,
+  CHAT_BURST_LIMIT,
 } from '@dimovie/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { RateLimitService } from '../security/rate-limit.service';
+import { TrustScoreService } from '../security/trust-score.service';
 
 @Injectable()
 export class ChatService {
   private readonly RECENT_LIMIT = 100;
-  /** Max delivered messages per minute (≈ one every 5s). */
-  private readonly CHAT_LIMIT = Math.floor(60_000 / CHAT_MIN_INTERVAL_MS);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly analytics: AnalyticsService,
+    private readonly rateLimit: RateLimitService,
+    private readonly trust: TrustScoreService,
   ) {}
 
   async sendMessage(
@@ -84,6 +87,7 @@ export class ChatService {
 
       if (violations >= CHAT_SHADOW_VIOLATIONS) {
         await this.redis.client.set(shadowKey, '1', 'EX', CHAT_SHADOW_BAN_SEC);
+        await this.trust.record(`user:${userId}`, 'chat_burst');
         return {
           kind: 'shadow',
           message: this.buildShadowMessage(
@@ -102,10 +106,12 @@ export class ChatService {
       return { kind: 'cooldown', waitSeconds };
     }
 
-    const rateKey = `ratelimit:chat:${userId}`;
-    const count = await this.redis.incrWithExpire(rateKey, 60);
-    if (count > this.CHAT_LIMIT) {
+    const burst = await this.rateLimit.consumeChatBurst(userId);
+    if (!burst.allowed) {
       await this.redis.client.set(shadowKey, '1', 'EX', CHAT_SHADOW_BAN_SEC);
+      await this.trust.record(`user:${userId}`, 'chat_burst', {
+        intervalMs: elapsed,
+      });
       return {
         kind: 'shadow',
         message: this.buildShadowMessage(
@@ -115,6 +121,12 @@ export class ChatService {
           sanitized,
         ),
       };
+    }
+
+    if (burst.count > Math.floor(CHAT_BURST_LIMIT * 0.7)) {
+      await this.trust.record(`user:${userId}`, 'chat_burst', {
+        intervalMs: elapsed,
+      });
     }
 
     const message = await this.prisma.message.create({
@@ -136,6 +148,10 @@ export class ChatService {
 
     await this.redis.client.set(lastKey, String(now), 'EX', 3600);
     await this.redis.client.del(`chat:violations:${userId}`);
+    await this.prisma.room.update({
+      where: { id: roomId },
+      data: { lastActivityAt: new Date() },
+    });
 
     void this.analytics.incrementSessionMessages(roomId);
 

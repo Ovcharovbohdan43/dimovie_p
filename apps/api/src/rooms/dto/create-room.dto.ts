@@ -36,6 +36,11 @@ export class CreateRoomDto {
   @IsString()
   @MaxLength(1000)
   rules?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  captchaToken?: string;
 }
 
 export class SetVideoDto {

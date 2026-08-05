@@ -2,24 +2,34 @@
 
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { loginSchema, type LoginInput } from "@dimovie/shared";
+import {
+  loginSchema,
+  type LoginInput,
+  SECURITY_ERROR_CODES,
+} from "@dimovie/shared";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { API_URL } from "@/lib/api";
+import { API_URL, ApiError } from "@/lib/api";
 import { toUserMessage } from "@/lib/user-message";
 import { CinematicShell } from "@/components/layout/cinematic-shell";
 import { LoadingScreen } from "@/components/ui/loading-spinner";
+import {
+  TurnstileWidget,
+  useSecurityChallenge,
+} from "@/components/security/turnstile-widget";
 
 export default function LoginPage() {
   return (
     <Suspense
-      fallback={<LoadingScreen message="Loading..." className="h-screen bg-[#08080c]" />}
+      fallback={
+        <LoadingScreen message="Loading..." className="h-screen bg-[#08080c]" />
+      }
     >
       <LoginForm />
     </Suspense>
@@ -31,6 +41,8 @@ function LoginForm() {
   const params = useSearchParams();
   const redirect = params.get("redirect") ?? "/dashboard";
   const { login } = useAuth();
+  const challenge = useSecurityChallenge();
+  const [forceCaptcha, setForceCaptcha] = useState(false);
   const {
     register,
     handleSubmit,
@@ -39,9 +51,24 @@ function LoginForm() {
     resolver: zodResolver(loginSchema),
   });
 
+  const showCaptcha = forceCaptcha || challenge.captchaRequired;
+
   const onSubmit = async (data: LoginInput) => {
-    await login.mutateAsync(data);
-    router.push(redirect);
+    try {
+      await login.mutateAsync({
+        ...data,
+        captchaToken: challenge.captchaToken ?? undefined,
+      });
+      router.push(redirect);
+    } catch (err) {
+      if (
+        err instanceof ApiError &&
+        err.code === SECURITY_ERROR_CODES.CAPTCHA_REQUIRED
+      ) {
+        setForceCaptcha(true);
+        await challenge.refresh();
+      }
+    }
   };
 
   return (
@@ -87,6 +114,13 @@ function LoginForm() {
             )}
           </div>
 
+          {showCaptcha && challenge.siteKey ? (
+            <TurnstileWidget
+              siteKey={challenge.siteKey}
+              onToken={challenge.setCaptchaToken}
+            />
+          ) : null}
+
           {login.error && (
             <p className="text-sm text-[#e50914]">
               {toUserMessage(login.error.message)}
@@ -107,7 +141,9 @@ function LoginForm() {
             <div className="w-full border-t border-white/10" />
           </div>
           <div className="relative flex justify-center text-xs">
-            <span className="bg-[#0e0e14]/90 px-2 text-white/40">or continue with</span>
+            <span className="bg-[#0e0e14]/90 px-2 text-white/40">
+              or continue with
+            </span>
           </div>
         </div>
 

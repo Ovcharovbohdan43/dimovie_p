@@ -10,9 +10,15 @@ import {
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
 import { Server } from 'socket.io';
-import { WS_ROOM_EVENTS } from '@dimovie/shared';
+import {
+  WS_ROOM_EVENTS,
+  SECURITY_ERROR_CODES,
+  WS_MAX_CONNECTIONS_PER_IP,
+  WS_MAX_CONNECTIONS_PER_USER,
+  WS_GUEST_MAX_PER_IP,
+} from '@dimovie/shared';
 import type { SyncIntentPayload } from '@dimovie/shared';
-import { WsAuthService, type AuthedSocket } from './ws-auth.service';
+import { WsAuthService, type RoomSocket } from './ws-auth.service';
 import { SyncService } from './sync.service';
 import { ChatService } from './chat.service';
 import { RoomPresenceService } from './room-presence.service';
@@ -20,7 +26,10 @@ import { ModerationService } from '../moderation/moderation.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { RateLimitService } from '../security/rate-limit.service';
+import { TrustScoreService } from '../security/trust-score.service';
 import { getCorsOptions } from '../common/cors';
+import * as argon2 from 'argon2';
 
 @WebSocketGateway({
   cors: getCorsOptions(),
@@ -35,7 +44,6 @@ export class RealtimeGateway
   server!: Server;
 
   private readonly logger = new Logger(RealtimeGateway.name);
-  /** Per-room/user typing emit throttle (socket id not needed — user+room is enough). */
   private readonly lastTypingAt = new Map<string, number>();
 
   constructor(
@@ -47,39 +55,124 @@ export class RealtimeGateway
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly analytics: AnalyticsService,
+    private readonly rateLimit: RateLimitService,
+    private readonly trust: TrustScoreService,
   ) {}
 
   afterInit(server: Server) {
     this.presence.setServer(server);
   }
 
-  async handleConnection(client: AuthedSocket) {
-    try {
-      const user = await this.wsAuth.authenticate(client);
-      client.user = user;
-      client.data.userId = user.id;
-      this.logger.log(`ws connected user=${user.id}`);
-    } catch (err) {
-      this.logger.warn(
-        `ws auth failed: ${err instanceof Error ? err.message : 'unauthorized'}`,
-      );
-      client.emit(WS_ROOM_EVENTS.ERROR, { message: 'Unauthorized' });
+  async handleConnection(client: RoomSocket) {
+    const ip =
+      (client.handshake.headers['x-forwarded-for'] as string | undefined)
+        ?.split(',')[0]
+        ?.trim() ||
+      client.handshake.address ||
+      'unknown';
+
+    const conn = await this.rateLimit.consumeWsConnect(
+      ip,
+      WS_MAX_CONNECTIONS_PER_IP,
+      60,
+    );
+    if (!conn.allowed) {
+      client.emit(WS_ROOM_EVENTS.ERROR, {
+        message: 'Too many connections from this network',
+        code: SECURITY_ERROR_CODES.RATE_LIMITED,
+      });
       client.disconnect(true);
+      return;
     }
+
+    const user = await this.wsAuth.tryAuthenticate(client);
+    if (user) {
+      const userConn = await this.rateLimit.hit(
+        `ratelimit:ws:user:${user.id}`,
+        WS_MAX_CONNECTIONS_PER_USER,
+        60,
+      );
+      if (!userConn.allowed) {
+        client.emit(WS_ROOM_EVENTS.ERROR, {
+          message: 'Too many open sessions',
+          code: SECURITY_ERROR_CODES.RATE_LIMITED,
+        });
+        client.disconnect(true);
+        return;
+      }
+
+      client.user = user;
+      client.isGuest = false;
+      client.data.userId = user.id;
+      await this.trust.record(`user:${user.id}`, 'ws_connect');
+      this.logger.log(`ws connected user=${user.id}`);
+      return;
+    }
+
+    const guestConn = await this.rateLimit.hit(
+      `ratelimit:ws:guest:${ip}`,
+      WS_GUEST_MAX_PER_IP,
+      60,
+    );
+    if (!guestConn.allowed) {
+      client.emit(WS_ROOM_EVENTS.ERROR, {
+        message: 'Too many guest connections',
+        code: SECURITY_ERROR_CODES.RATE_LIMITED,
+      });
+      client.disconnect(true);
+      return;
+    }
+
+    client.isGuest = true;
+    client.guestId = `guest:${client.id}`;
+    client.data.userId = client.guestId;
+    await this.trust.record(`ip:${ip}`, 'guest_join');
+    this.logger.log(`ws connected guest=${client.guestId}`);
   }
 
-  async handleDisconnect(client: AuthedSocket) {
+  async handleDisconnect(client: RoomSocket) {
     if (client.roomCode) {
       await this.leaveRoom(client, client.roomCode);
     }
   }
 
+  private async guardEvent(client: RoomSocket): Promise<boolean> {
+    const ok = await this.rateLimit.consumeWsEvent(client.id);
+    if (!ok) {
+      client.emit(WS_ROOM_EVENTS.ERROR, {
+        message: 'Too many events',
+        code: SECURITY_ERROR_CODES.RATE_LIMITED,
+      });
+      return false;
+    }
+    return true;
+  }
+
+  private requireMember(client: RoomSocket): boolean {
+    if (client.isGuest || !client.user) {
+      client.emit(WS_ROOM_EVENTS.ERROR, {
+        message: 'Sign in to interact',
+        code: SECURITY_ERROR_CODES.GUEST_FORBIDDEN,
+        scope: 'auth',
+      });
+      return false;
+    }
+    return true;
+  }
+
   @SubscribeMessage(WS_ROOM_EVENTS.JOIN)
   async onJoin(
-    @ConnectedSocket() client: AuthedSocket,
+    @ConnectedSocket() client: RoomSocket,
     @MessageBody() body: { roomCode: string; password?: string },
   ) {
-    const roomCode = body.roomCode.toUpperCase();
+    if (!(await this.guardEvent(client))) return;
+
+    const roomCode = body.roomCode?.toUpperCase?.();
+    if (!roomCode) {
+      client.emit(WS_ROOM_EVENTS.ERROR, { message: 'Room not found' });
+      return;
+    }
+
     const room = await this.prisma.room.findUnique({
       where: { roomCode },
       include: { participants: true, owner: true },
@@ -87,6 +180,54 @@ export class RealtimeGateway
 
     if (!room || room.status !== 'ACTIVE') {
       client.emit(WS_ROOM_EVENTS.ERROR, { message: 'Room not found' });
+      return;
+    }
+
+    // Guest path — watch-only, no Participant row.
+    if (client.isGuest || !client.user) {
+      if (room.privacy === 'PASSWORD') {
+        if (!body.password || !room.passwordHash) {
+          client.emit(WS_ROOM_EVENTS.ERROR, { message: 'Password required' });
+          return;
+        }
+        const valid = await argon2.verify(room.passwordHash, body.password);
+        if (!valid) {
+          client.emit(WS_ROOM_EVENTS.ERROR, { message: 'Invalid password' });
+          return;
+        }
+      }
+
+      if (client.roomCode) {
+        await this.leaveRoom(client, client.roomCode);
+      }
+
+      client.roomCode = roomCode;
+      await client.join(`room:${roomCode}`);
+
+      const presenceKey = `room:${roomCode}:presence`;
+      await this.redis.client.hset(
+        presenceKey,
+        client.id,
+        client.guestId ?? `guest:${client.id}`,
+      );
+      await this.redis.client.expire(presenceKey, 120);
+
+      const participants = await this.getParticipants(roomCode);
+      const syncState = await this.syncService.getState(roomCode);
+      const recentChat = await this.chatService.getRecent(roomCode);
+
+      client.emit(WS_ROOM_EVENTS.JOINED, {
+        roomCode,
+        syncState,
+        recentChat,
+        participants,
+        mode: 'guest',
+      });
+
+      await this.prisma.room.update({
+        where: { id: room.id },
+        data: { lastActivityAt: new Date() },
+      });
       return;
     }
 
@@ -101,11 +242,24 @@ export class RealtimeGateway
     }
 
     const isParticipant = room.participants.some(
-      (p) => p.userId === client.user.id,
+      (p) => p.userId === client.user!.id,
     );
 
     if (!isParticipant) {
       if (room.privacy === 'PUBLIC' || room.privacy === 'PRIVATE') {
+        await this.prisma.participant.create({
+          data: { roomId: room.id, userId: client.user.id },
+        });
+      } else if (room.privacy === 'PASSWORD') {
+        if (!body.password || !room.passwordHash) {
+          client.emit(WS_ROOM_EVENTS.ERROR, { message: 'Not a participant' });
+          return;
+        }
+        const valid = await argon2.verify(room.passwordHash, body.password);
+        if (!valid) {
+          client.emit(WS_ROOM_EVENTS.ERROR, { message: 'Invalid password' });
+          return;
+        }
         await this.prisma.participant.create({
           data: { roomId: room.id, userId: client.user.id },
         });
@@ -136,27 +290,35 @@ export class RealtimeGateway
       syncState,
       recentChat,
       participants,
+      mode: 'member',
     });
 
     client.to(`room:${roomCode}`).emit(WS_ROOM_EVENTS.PARTICIPANTS, participants);
 
     void this.analytics.updateSessionPeak(room.id, participants.length);
+    await this.prisma.room.update({
+      where: { id: room.id },
+      data: { lastActivityAt: new Date() },
+    });
   }
 
   @SubscribeMessage(WS_ROOM_EVENTS.LEAVE)
   async onLeave(
-    @ConnectedSocket() client: AuthedSocket,
+    @ConnectedSocket() client: RoomSocket,
     @MessageBody() body: { roomCode: string },
   ) {
+    if (!(await this.guardEvent(client))) return;
     await this.leaveRoom(client, body.roomCode.toUpperCase());
   }
 
   @SubscribeMessage(WS_ROOM_EVENTS.SYNC_INTENT)
   async onSyncIntent(
-    @ConnectedSocket() client: AuthedSocket,
+    @ConnectedSocket() client: RoomSocket,
     @MessageBody() intent: SyncIntentPayload,
   ) {
-    if (!client.roomCode) return;
+    if (!(await this.guardEvent(client))) return;
+    if (!this.requireMember(client)) return;
+    if (!client.roomCode || !client.user) return;
 
     try {
       const state = await this.syncService.applyIntent(
@@ -165,7 +327,20 @@ export class RealtimeGateway
         intent,
       );
 
-      this.server.in(`room:${client.roomCode}`).emit(WS_ROOM_EVENTS.SYNC_STATE, state);
+      const room = await this.prisma.room.findUnique({
+        where: { roomCode: client.roomCode },
+        select: { id: true },
+      });
+      if (room) {
+        await this.prisma.room.update({
+          where: { id: room.id },
+          data: { lastActivityAt: new Date() },
+        });
+      }
+
+      this.server
+        .in(`room:${client.roomCode}`)
+        .emit(WS_ROOM_EVENTS.SYNC_STATE, state);
     } catch (err) {
       client.emit(WS_ROOM_EVENTS.ERROR, {
         message:
@@ -177,10 +352,12 @@ export class RealtimeGateway
 
   @SubscribeMessage(WS_ROOM_EVENTS.CHAT_MESSAGE)
   async onChatMessage(
-    @ConnectedSocket() client: AuthedSocket,
+    @ConnectedSocket() client: RoomSocket,
     @MessageBody() body: { content: string },
   ) {
-    if (!client.roomCode) {
+    if (!(await this.guardEvent(client))) return;
+    if (!this.requireMember(client)) return;
+    if (!client.roomCode || !client.user) {
       this.logger.warn(
         `chat:message dropped — socket not in a room user=${client.user?.id}`,
       );
@@ -207,7 +384,6 @@ export class RealtimeGateway
 
       switch (result.kind) {
         case 'broadcast':
-          // Echo to sender first, then room (covers Redis/adapter edge cases)
           client.emit(WS_ROOM_EVENTS.CHAT_MESSAGE, result.message);
           client
             .to(`room:${client.roomCode}`)
@@ -235,7 +411,9 @@ export class RealtimeGateway
   }
 
   @SubscribeMessage(WS_ROOM_EVENTS.CHAT_TYPING)
-  onChatTyping(@ConnectedSocket() client: AuthedSocket) {
+  async onChatTyping(@ConnectedSocket() client: RoomSocket) {
+    if (!(await this.guardEvent(client))) return;
+    if (!this.requireMember(client)) return;
     if (!client.roomCode || !client.user) return;
     const key = `${client.roomCode}:${client.user.id}`;
     const now = Date.now();
@@ -251,9 +429,11 @@ export class RealtimeGateway
 
   @SubscribeMessage(WS_ROOM_EVENTS.CHAT_DELETE)
   async onChatDelete(
-    @ConnectedSocket() client: AuthedSocket,
+    @ConnectedSocket() client: RoomSocket,
     @MessageBody() body: { messageId: string },
   ) {
+    if (!(await this.guardEvent(client))) return;
+    if (!this.requireMember(client)) return;
     if (!client.roomCode || !client.user) return;
 
     const room = await this.prisma.room.findUnique({
@@ -275,9 +455,11 @@ export class RealtimeGateway
 
   @SubscribeMessage(WS_ROOM_EVENTS.REACTION)
   async onReaction(
-    @ConnectedSocket() client: AuthedSocket,
+    @ConnectedSocket() client: RoomSocket,
     @MessageBody() body: { emoji: string },
   ) {
+    if (!(await this.guardEvent(client))) return;
+    if (!this.requireMember(client)) return;
     if (!client.roomCode || !client.user) return;
 
     const emoji = await this.chatService.acceptReaction(
@@ -301,12 +483,14 @@ export class RealtimeGateway
     });
   }
 
-  private async leaveRoom(client: AuthedSocket, roomCode: string) {
+  private async leaveRoom(client: RoomSocket, roomCode: string) {
     client.leave(`room:${roomCode}`);
     await this.redis.client.hdel(`room:${roomCode}:presence`, client.id);
     client.roomCode = undefined;
 
-    await this.presence.broadcastParticipants(roomCode);
+    if (!client.isGuest) {
+      await this.presence.broadcastParticipants(roomCode);
+    }
   }
 
   private async getParticipants(roomCode: string) {
