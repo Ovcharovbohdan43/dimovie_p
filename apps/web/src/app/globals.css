@@ -110,6 +110,26 @@
     font-weight: 400;
   }
 
+  /* Mobile fullscreen fallback when Fullscreen API / iOS webkit FS is unavailable */
+  html.dimovie-fs-active,
+  body.dimovie-fs-active {
+    overflow: hidden !important;
+    overscroll-behavior: none;
+    touch-action: none;
+  }
+
+  .dimovie-fs-fallback {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 9999 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-width: none !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    background: #000 !important;
+  }
+
   .dm-app {
     background-color: #050508;
     background-image:

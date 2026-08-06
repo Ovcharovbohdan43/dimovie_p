@@ -5,6 +5,13 @@ import { AlertCircle } from "lucide-react";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import type { SyncStatePayload } from "@dimovie/shared";
 import { parseVideoUrl } from "@/lib/video-url";
+import {
+  clearCssFullscreenFallback,
+  isElementFullscreen,
+  subscribeFullscreenChange,
+  toggleContainerFullscreen,
+  toggleVideoFullscreen,
+} from "@/lib/fullscreen";
 import { useYouTubeApiReady, type YTPlayer } from "@/hooks/use-youtube-api";
 import {
   configureYouTubeIframe,
@@ -221,13 +228,12 @@ export function SyncVideoPlayer({
     videoRef.current?.pause();
   }, [broadcastEnded]);
 
-  useEffect(() => {
-    const onFsChange = () => {
-      setIsFullscreen(document.fullscreenElement === containerRef.current);
-    };
-    document.addEventListener("fullscreenchange", onFsChange);
-    return () => document.removeEventListener("fullscreenchange", onFsChange);
-  }, []);
+  useEffect(
+    () => () => {
+      clearCssFullscreenFallback(containerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => () => clearPlayRetries(), [clearPlayRetries]);
 
@@ -493,6 +499,17 @@ export function SyncVideoPlayer({
   const isDirect = parsed.provider === "direct";
   const duckFactor = Math.min(1, Math.max(0, voiceDuckFactor));
 
+  useEffect(() => {
+    const syncFs = () => {
+      const container = containerRef.current;
+      const video = isDirect ? videoRef.current : null;
+      const cssOn = container?.classList.contains("dimovie-fs-fallback") ?? false;
+      setIsFullscreen(isElementFullscreen(container, video) || cssOn);
+    };
+    // Bind after playerReady so iOS video webkit* listeners attach to the node.
+    return subscribeFullscreenChange(syncFs, isDirect ? videoRef.current : null);
+  }, [url, isDirect, playerReady]);
+
   const applyOutputVolume = useCallback(() => {
     const base = muted ? 0 : volume;
     const effective = Math.min(1, Math.max(0, base * duckFactor));
@@ -658,10 +675,11 @@ export function SyncVideoPlayer({
   const toggleFullscreen = useCallback(async () => {
     const el = containerRef.current;
     if (!el) return;
-    if (document.fullscreenElement === el) {
-      await document.exitFullscreen();
-    } else {
-      await el.requestFullscreen();
+    try {
+      const on = await toggleContainerFullscreen(el);
+      setIsFullscreen(on);
+    } catch {
+      /* gesture / policy */
     }
   }, []);
 
@@ -717,14 +735,15 @@ export function SyncVideoPlayer({
   }, []);
 
   const toggleDirectFullscreen = useCallback(async () => {
-    const el = parsed.provider === "direct" ? videoRef.current : containerRef.current;
-    if (!el) return;
-    if (document.fullscreenElement === el) {
-      await document.exitFullscreen();
-    } else {
-      await el.requestFullscreen();
+    const container = containerRef.current;
+    if (!container) return;
+    try {
+      const on = await toggleVideoFullscreen(container, videoRef.current);
+      setIsFullscreen(on);
+    } catch {
+      /* gesture / policy */
     }
-  }, [parsed.provider]);
+  }, []);
 
   const showQuality = isYoutube;
   const showCaptions = isYoutube;
@@ -1413,7 +1432,17 @@ export function SyncVideoPlayer({
             <button
               type="button"
               className="player-ctrl"
-              onClick={isYoutube ? toggleFullscreen : toggleDirectFullscreen}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                revealControls();
+                if (isYoutube) {
+                  void toggleFullscreen();
+                } else {
+                  void toggleDirectFullscreen();
+                }
+                scheduleHideControls();
+              }}
               title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
             >
               {isFullscreen ? (
