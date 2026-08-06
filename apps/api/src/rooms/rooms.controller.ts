@@ -13,7 +13,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../auth/public.decorator';
 import { RoomsService } from './rooms.service';
-import { CreateRoomDto } from './dto/create-room.dto';
+import { CreateRoomDto, UpdateRoomScheduleDto } from './dto/create-room.dto';
 import { SetVideoDto } from './dto/set-video.dto';
 import { JoinRoomDto } from './dto/join-room.dto';
 import { UpdateRoomBrandingDto } from './dto/update-room-branding.dto';
@@ -97,5 +97,14 @@ export class RoomsController {
     @Body() dto: UpdateRoomBrandingDto,
   ) {
     return this.roomsService.updateBranding(id, req.user.id, dto);
+  }
+
+  @Patch(':id/schedule')
+  updateSchedule(
+    @Param('id') id: string,
+    @Req() req: { user: AuthUser },
+    @Body() dto: UpdateRoomScheduleDto,
+  ) {
+    return this.roomsService.updateSchedule(id, req.user.id, dto);
   }
 }

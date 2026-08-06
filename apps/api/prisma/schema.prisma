@@ -151,18 +151,21 @@ model Room {
   privacy        RoomPrivacy     @default(PUBLIC)
   passwordHash   String?         @map("password_hash")
   maxUsers       Int             @default(100) @map("max_users")
-  description    String?         @db.VarChar(500)
-  rules          String?         @db.VarChar(1000)
-  videoSource    VideoSource?
-  participants   Participant[]
-  messages       Message[]
-  playbackState  PlaybackState?
-  bans           RoomBan[]
-  sessions       RoomSession[]
-  branding       Json?           @map("branding")
+  description        String?         @db.VarChar(500)
+  rules              String?         @db.VarChar(1000)
+  /// When the host plans to start watching — powers "Starting soon" discovery.
+  scheduledStartsAt  DateTime?       @map("scheduled_starts_at")
+  videoSource        VideoSource?
+  participants       Participant[]
+  messages           Message[]
+  playbackState      PlaybackState?
+  bans               RoomBan[]
+  sessions           RoomSession[]
+  branding           Json?           @map("branding")
 
   @@index([ownerId])
   @@index([status, lastActivityAt])
+  @@index([privacy, status, scheduledStartsAt])
   @@map("rooms")
 }
 

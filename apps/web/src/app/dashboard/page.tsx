@@ -8,6 +8,7 @@ import { motion, useReducedMotion } from "motion/react";
 import type { RoomSummary, WatchHistoryItem } from "@dimovie/shared";
 import { getPlanCapabilities } from "@dimovie/shared";
 import { api, publicApi } from "@/lib/api";
+import { datetimeLocalToIso } from "@/lib/datetime-local";
 import { useAuth } from "@/hooks/use-auth";
 import { ContentRow } from "@/components/home/content-row";
 import { RoomCard } from "@/components/home/room-card";
@@ -37,6 +38,7 @@ function DashboardContent() {
   const [password, setPassword] = useState("");
   const [description, setDescription] = useState("");
   const [rules, setRules] = useState("");
+  const [scheduledLocal, setScheduledLocal] = useState("");
 
   useEffect(() => {
     if (me.isError) router.push("/login");
@@ -76,19 +78,23 @@ function DashboardContent() {
   });
 
   const createRoom = useMutation({
-    mutationFn: () =>
-      api<RoomSummary>("/rooms", {
+    mutationFn: () => {
+      const scheduledStartsAt = datetimeLocalToIso(scheduledLocal);
+      return api<RoomSummary>("/rooms", {
         method: "POST",
         body: JSON.stringify({
           privacy,
           ...(privacy === "PASSWORD" && { password }),
           ...(description.trim() && { description: description.trim() }),
           ...(privacy === "PUBLIC" && rules.trim() && { rules: rules.trim() }),
+          ...(scheduledStartsAt && { scheduledStartsAt }),
         }),
-      }),
+      });
+    },
     onSuccess: (room) => {
       qc.invalidateQueries({ queryKey: ["rooms"] });
       setOpen(false);
+      setScheduledLocal("");
       router.push(`/room/${room.roomCode}`);
     },
   });
@@ -230,6 +236,18 @@ function DashboardContent() {
                     rows={3}
                     className="mt-1 w-full resize-none rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-[#e50914]"
                   />
+                </div>
+                <div>
+                  <Label>Starts at (optional)</Label>
+                  <Input
+                    type="datetime-local"
+                    value={scheduledLocal}
+                    onChange={(e) => setScheduledLocal(e.target.value)}
+                    className="mt-1 border-white/10 bg-white/[0.04] [color-scheme:dark]"
+                  />
+                  <p className="mt-1 text-xs text-white/40">
+                    Public parties with a start time appear in Starting soon
+                  </p>
                 </div>
                 {privacy === "PUBLIC" && (
                   <div>

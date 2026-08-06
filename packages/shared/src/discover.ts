@@ -13,6 +13,7 @@ export type DiscoverableRoom = {
   hasVideo: boolean;
   createdAtMs: number;
   lastActivityAtMs: number;
+  scheduledStartsAtMs?: number | null;
 };
 
 export type RankedDiscoverRoom<T> = T & {
@@ -21,10 +22,28 @@ export type RankedDiscoverRoom<T> = T & {
 };
 
 const HALF_LIFE_MS = 6 * 60 * 60 * 1000; // 6h activity half-life
+/** Upcoming schedules beyond this window leave "Starting soon". */
+export const SCHEDULE_SOON_WINDOW_MS = 48 * 60 * 60 * 1000;
 
 function activityDecay(lastActivityAtMs: number, now: number): number {
   const age = Math.max(0, now - lastActivityAtMs);
   return Math.exp(-age / HALF_LIFE_MS);
+}
+
+export function isUpcomingSchedule(
+  scheduledStartsAt: string | number | Date | null | undefined,
+  now = Date.now(),
+  windowMs = SCHEDULE_SOON_WINDOW_MS,
+): boolean {
+  if (scheduledStartsAt == null || scheduledStartsAt === "") return false;
+  const t =
+    typeof scheduledStartsAt === "number"
+      ? scheduledStartsAt
+      : scheduledStartsAt instanceof Date
+        ? scheduledStartsAt.getTime()
+        : Date.parse(scheduledStartsAt);
+  if (!Number.isFinite(t)) return false;
+  return t > now && t - now <= windowMs;
 }
 
 /** Raw relevance before diversity re-ranking. */
@@ -43,7 +62,17 @@ export function scoreDiscoverRoom(
   const liveWithVideo = live > 0 && room.hasVideo ? 10 : 0;
   const freshness = decay * 6;
 
-  return liveScore + crowdScore + videoBoost + liveWithVideo + freshness;
+  let scheduleBoost = 0;
+  if (
+    room.scheduledStartsAtMs != null &&
+    isUpcomingSchedule(room.scheduledStartsAtMs, now)
+  ) {
+    const hoursUntil = (room.scheduledStartsAtMs - now) / (60 * 60 * 1000);
+    // Soonest starts rank higher within the scheduled bucket / overall feed
+    scheduleBoost = Math.max(0, 8 - hoursUntil * 0.35);
+  }
+
+  return liveScore + crowdScore + videoBoost + liveWithVideo + freshness + scheduleBoost;
 }
 
 /**
@@ -91,21 +120,35 @@ export function rankDiscoverRooms<T extends DiscoverableRoom>(
   return picked;
 }
 
-/** Bucket helpers for UI rails. */
+/** Bucket helpers for UI rails — mutually exclusive. */
 export function partitionDiscoverFeed<
-  T extends { liveViewers?: number; videoSource?: { url?: string }; discoverScore?: number },
->(rooms: T[]) {
+  T extends {
+    liveViewers?: number;
+    videoSource?: { url?: string };
+    scheduledStartsAt?: string | null;
+  },
+>(rooms: T[], now = Date.now()) {
+  const starting = rooms
+    .filter((r) => isUpcomingSchedule(r.scheduledStartsAt, now))
+    .slice()
+    .sort(
+      (a, b) =>
+        Date.parse(a.scheduledStartsAt!) - Date.parse(b.scheduledStartsAt!),
+    );
+
+  const startingSet = new Set(starting);
+
   const live = rooms.filter(
-    (r) => (r.liveViewers ?? 0) > 0 && !!r.videoSource?.url,
-  );
-  const starting = rooms.filter(
     (r) =>
-      !!r.videoSource?.url &&
-      (r.liveViewers ?? 0) === 0 &&
-      !live.includes(r),
+      !startingSet.has(r) &&
+      (r.liveViewers ?? 0) > 0 &&
+      !!r.videoSource?.url,
   );
-  const fresh = rooms.filter(
-    (r) => !live.includes(r) && !starting.includes(r),
+  const liveSet = new Set(live);
+
+  const discover = rooms.filter(
+    (r) => !startingSet.has(r) && !liveSet.has(r),
   );
-  return { live, starting, fresh };
+
+  return { live, starting, discover, fresh: discover };
 }

@@ -1,9 +1,9 @@
 import {
+  IsDateString,
   IsEnum,
   IsInt,
   IsOptional,
   IsString,
-  IsUrl,
   Max,
   MaxLength,
   Min,
@@ -38,26 +38,18 @@ export class CreateRoomDto {
   rules?: string;
 
   @IsOptional()
+  @IsDateString()
+  scheduledStartsAt?: string | null;
+
+  @IsOptional()
   @IsString()
   @MaxLength(2048)
   captchaToken?: string;
 }
 
-export class SetVideoDto {
-  @IsEnum(['EMBED', 'UPLOAD'])
-  type!: 'EMBED' | 'UPLOAD';
-
-  @IsString()
-  @MinLength(5)
-  @MaxLength(2048)
-  url!: string;
-
-  @IsOptional()
-  metadata?: Record<string, unknown>;
-}
-
-export class JoinRoomDto {
-  @IsOptional()
-  @IsString()
-  password?: string;
+export class UpdateRoomScheduleDto {
+  /** ISO datetime, or null to clear. */
+  @ValidateIf((_, v) => v !== null)
+  @IsDateString()
+  scheduledStartsAt!: string | null;
 }

@@ -168,6 +168,20 @@ export function RoomMetaBar({
               <Clock3 className="size-3.5 text-white/40" />
               {formatDuration(watchSeconds)}
             </span>
+
+            {room.scheduledStartsAt &&
+            new Date(room.scheduledStartsAt).getTime() > Date.now() ? (
+              <span className="inline-flex items-center gap-1.5 text-[#9ec9ea]">
+                Starts{" "}
+                {new Date(room.scheduledStartsAt).toLocaleString(undefined, {
+                  weekday: "short",
+                  month: "short",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
+            ) : null}
           </div>
 
           {room.description ? (

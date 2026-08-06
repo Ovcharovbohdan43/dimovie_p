@@ -31,6 +31,7 @@ import { RoomPasswordForm } from "@/components/room/room-password-form";
 import { RoomCatalogSetup } from "@/components/room/room-catalog-setup";
 import { HostCatalogControls } from "@/components/room/host-catalog-controls";
 import { RoomBrandingForm } from "@/components/room/room-branding-form";
+import { RoomScheduleForm } from "@/components/room/room-schedule-form";
 import { VoiceDock } from "@/components/room/voice-dock";
 import { RoomMetaBar } from "@/components/room/room-meta-bar";
 import { useVoiceChat } from "@/hooks/use-voice-chat";
@@ -803,6 +804,10 @@ export default function RoomPage({
                     setShowSetup(false);
                   }}
                 />
+                <RoomScheduleForm
+                  room={activeRoom}
+                  onUpdated={handleCatalogUpdated}
+                />
               </div>
             ) : videoUrl && activeRoom ? (
               <div className="relative mx-auto w-full max-w-[1400px]">
@@ -911,7 +916,16 @@ export default function RoomPage({
             )}
           </div>
           {isOwner && activeRoom && !showSetup && (
-            <RoomBrandingForm room={activeRoom} onUpdated={handleCatalogUpdated} />
+            <>
+              <RoomScheduleForm
+                room={activeRoom}
+                onUpdated={handleCatalogUpdated}
+              />
+              <RoomBrandingForm
+                room={activeRoom}
+                onUpdated={handleCatalogUpdated}
+              />
+            </>
           )}
         </div>
         {/* Chat sidebar — desktop */}

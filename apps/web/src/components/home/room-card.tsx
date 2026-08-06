@@ -11,9 +11,10 @@ import Link from "next/link";
 import Image from "next/image";
 import { motion } from "motion/react";
 import type { RoomSummary } from "@dimovie/shared";
-import { getVideoPreview } from "@dimovie/shared";
+import { getVideoPreview, isUpcomingSchedule } from "@dimovie/shared";
 import { cn } from "@/lib/utils";
 import { LiveDot, PlayMark } from "@/components/home/marks";
+import { formatScheduleLabel } from "@/lib/datetime-local";
 
 interface RoomCardProps {
   room: RoomSummary;
@@ -140,7 +141,8 @@ export function RoomCard({ room, className }: RoomCardProps) {
   const { title, thumbnail } = getRoomPreview(room);
   const hasVideo = !!room.videoSource?.url;
   const watching = room.liveViewers ?? room.participantCount;
-  const isLive = hasVideo && watching > 0;
+  const upcoming = isUpcomingSchedule(room.scheduledStartsAt);
+  const isLive = hasVideo && watching > 0 && !upcoming;
   const description = room.description?.trim() || null;
   const [expanded, setExpanded] = useState(false);
 
@@ -193,6 +195,11 @@ export function RoomCard({ room, className }: RoomCardProps) {
               <span className="inline-flex items-center gap-1.5 rounded-full bg-[#e50914] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white">
                 <LiveDot className="text-white" />
                 Live
+              </span>
+            )}
+            {upcoming && room.scheduledStartsAt && (
+              <span className="rounded-full bg-[#1a3a52] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#9ec9ea] backdrop-blur-md">
+                {formatScheduleLabel(room.scheduledStartsAt)}
               </span>
             )}
             <span className="rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/90 backdrop-blur-md">

@@ -23,6 +23,8 @@ export const createRoomSchema = z.object({
   maxUsers: z.number().int().min(2).max(500).default(100),
   description: z.string().max(500).optional(),
   rules: z.string().max(1000).optional(),
+  /** ISO datetime — when the watch party is planned to start. */
+  scheduledStartsAt: z.string().datetime().optional().nullable(),
 });
 
 export const setVideoSchema = z.object({
@@ -37,6 +39,13 @@ export const joinRoomSchema = z.object({
 
 export type CreateRoomInput = z.infer<typeof createRoomSchema>;
 export type SetVideoInput = z.infer<typeof setVideoSchema>;
+
+export const updateRoomScheduleSchema = z.object({
+  /** Pass null to clear the schedule. */
+  scheduledStartsAt: z.string().datetime().nullable(),
+});
+
+export type UpdateRoomScheduleInput = z.infer<typeof updateRoomScheduleSchema>;
 export const updateRoomBrandingSchema = z.object({
   accentColor: z
     .string()
@@ -103,6 +112,8 @@ export interface RoomSummary {
   branding?: RoomBranding;
   createdAt: string;
   lastActivityAt?: string;
+  /** Planned start time (ISO). Powers "Starting soon" rail. */
+  scheduledStartsAt?: string | null;
 }
 
 /** Public guest preview — no auth, no playable stream URLs */
@@ -115,6 +126,7 @@ export interface RoomPreview {
   rules?: string;
   owner: { displayName: string };
   requiresPassword: boolean;
+  scheduledStartsAt?: string | null;
   videoPreview?: {
     title?: string;
     thumbnail?: string;

@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   ConflictException,
+  BadRequestException,
   Inject,
   forwardRef,
 } from '@nestjs/common';
@@ -28,6 +29,7 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { ModerationService } from '../moderation/moderation.service';
 import { ProfilesService } from '../profiles/profiles.service';
 import { CreateRoomDto } from './dto/create-room.dto';
+import { UpdateRoomScheduleDto } from './dto/create-room.dto';
 import { SetVideoDto } from './dto/set-video.dto';
 import { JoinRoomDto } from './dto/join-room.dto';
 import { UpdateRoomBrandingDto } from './dto/update-room-branding.dto';
@@ -95,6 +97,7 @@ export class RoomsService {
         : null;
 
     const now = new Date();
+    const scheduledStartsAt = this.parseScheduleInput(dto.scheduledStartsAt);
     const room = await this.prisma.room.create({
       data: {
         roomCode,
@@ -104,6 +107,7 @@ export class RoomsService {
         maxUsers: Math.min(dto.maxUsers ?? maxUsersAllowed, maxUsersAllowed),
         description: dto.description?.trim() || null,
         rules: dto.privacy === 'PUBLIC' ? dto.rules?.trim() || null : null,
+        scheduledStartsAt,
         lastActivityAt: now,
         participants: {
           create: { userId: user.id, role: 'OWNER' },
@@ -200,6 +204,7 @@ export class RoomsService {
       hasVideo: !!room.videoSource?.url,
       createdAtMs: room.createdAt.getTime(),
       lastActivityAtMs: room.lastActivityAt.getTime(),
+      scheduledStartsAtMs: room.scheduledStartsAt?.getTime() ?? null,
       room,
     }));
 
@@ -255,6 +260,7 @@ export class RoomsService {
       rules: room.rules,
       owner: { displayName: room.owner.displayName },
       requiresPassword: room.privacy === 'PASSWORD',
+      scheduledStartsAt: room.scheduledStartsAt ?? null,
       videoPreview: room.videoSource
         ? {
             title: (meta?.title as string | undefined) ?? 'Watch Party',
@@ -353,6 +359,52 @@ export class RoomsService {
     });
 
     return this.toSummary(updated, room.owner.subscription);
+  }
+
+  async updateSchedule(
+    roomId: string,
+    userId: string,
+    dto: UpdateRoomScheduleDto,
+  ) {
+    const room = await this.prisma.room.findUnique({
+      where: { id: roomId },
+      include: { owner: { select: { subscription: true } } },
+    });
+    if (!room) throw new NotFoundException('Room not found');
+    if (room.ownerId !== userId) {
+      throw new ForbiddenException('Only owner can set the start time');
+    }
+
+    const scheduledStartsAt = this.parseScheduleInput(dto.scheduledStartsAt);
+    const updated = await this.prisma.room.update({
+      where: { id: roomId },
+      data: { scheduledStartsAt },
+      include: this.roomInclude(),
+    });
+
+    return this.toSummary(updated, room.owner.subscription);
+  }
+
+  private parseScheduleInput(
+    value: string | null | undefined,
+  ): Date | null {
+    if (value === undefined) return null;
+    if (value === null || value === '') return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Invalid scheduled start time');
+    }
+    const now = Date.now();
+    const maxAhead = 30 * 24 * 60 * 60 * 1000; // 30 days
+    if (date.getTime() < now - 60_000) {
+      throw new BadRequestException('Start time must be in the future');
+    }
+    if (date.getTime() - now > maxAhead) {
+      throw new BadRequestException(
+        'Start time cannot be more than 30 days ahead',
+      );
+    }
+    return date;
   }
 
   private async recordWatchHistory(userId: string, room: RoomSummary) {
@@ -506,6 +558,7 @@ export class RoomsService {
       branding?: unknown;
       createdAt: Date;
       lastActivityAt?: Date;
+      scheduledStartsAt?: Date | null;
       owner: {
         id: string;
         displayName: string;
@@ -551,6 +604,7 @@ export class RoomsService {
       branding,
       createdAt: room.createdAt.toISOString(),
       lastActivityAt: room.lastActivityAt?.toISOString(),
+      scheduledStartsAt: room.scheduledStartsAt?.toISOString() ?? null,
     };
   }
 }

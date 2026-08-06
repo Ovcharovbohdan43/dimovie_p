@@ -35,26 +35,20 @@ export default function HomePage() {
   });
 
   const rooms = publicRooms.data ?? [];
-  const { live, starting, fresh } = partitionDiscoverFeed(rooms);
-  // Server already ranks by hybrid score + owner diversity — keep that order
-  const trending = rooms.slice(0, 12);
+  const { live, starting, discover } = partitionDiscoverFeed(rooms);
 
   return (
     <div className="dm-app">
       <HeroBanner isAuthenticated={!!me.data} />
 
       <div className="relative z-[1] -mt-10 space-y-12 pb-16 sm:-mt-14 sm:space-y-16 md:space-y-20">
-        <ContentRow title="Discover parties">
-          {publicRooms.isLoading ? (
-            <RoomSkeletons />
-          ) : trending.length ? (
-            trending.map((room) => <RoomCard key={room.id} room={room} />)
-          ) : (
-            <p className="py-8 text-sm text-white/40">
-              No public parties right now — be the first to start one
-            </p>
-          )}
-        </ContentRow>
+        {starting.length > 0 && (
+          <ContentRow title="Starting soon">
+            {starting.map((room) => (
+              <RoomCard key={`start-${room.id}`} room={room} />
+            ))}
+          </ContentRow>
+        )}
 
         {live.length > 0 && (
           <ContentRow title="Live now">
@@ -64,19 +58,21 @@ export default function HomePage() {
           </ContentRow>
         )}
 
-        {starting.length > 0 && (
-          <ContentRow title="Starting soon">
-            {starting.map((room) => (
-              <RoomCard key={`start-${room.id}`} room={room} />
-            ))}
-          </ContentRow>
-        )}
-
-        {fresh.length > 0 && trending.length >= 8 && (
-          <ContentRow title="More to explore">
-            {fresh.slice(0, 12).map((room) => (
-              <RoomCard key={`fresh-${room.id}`} room={room} />
-            ))}
+        {(publicRooms.isLoading ||
+          discover.length > 0 ||
+          (!starting.length && !live.length)) && (
+          <ContentRow title="Discover parties">
+            {publicRooms.isLoading ? (
+              <RoomSkeletons />
+            ) : discover.length ? (
+              discover.slice(0, 16).map((room) => (
+                <RoomCard key={room.id} room={room} />
+              ))
+            ) : (
+              <p className="py-8 text-sm text-white/40">
+                No public parties right now — be the first to start one
+              </p>
+            )}
           </ContentRow>
         )}
 
