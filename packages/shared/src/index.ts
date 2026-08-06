@@ -1,5 +1,6 @@
 export * from "./auth.js";
 export * from "./room.js";
+export * from "./discover.js";
 export * from "./sync.js";
 export * from "./chat.js";
 export * from "./voice.js";

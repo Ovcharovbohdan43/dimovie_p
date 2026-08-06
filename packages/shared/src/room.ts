@@ -87,6 +87,10 @@ export interface RoomSummary {
   status: string;
   maxUsers: number;
   participantCount: number;
+  /** Live Socket.IO presence count (discovery feed). */
+  liveViewers?: number;
+  /** Hybrid discovery score from the API ranker. */
+  discoverScore?: number;
   description?: string;
   rules?: string;
   owner: { id: string; displayName: string };
@@ -98,6 +102,7 @@ export interface RoomSummary {
   planFeatures?: PlanCapabilities;
   branding?: RoomBranding;
   createdAt: string;
+  lastActivityAt?: string;
 }
 
 /** Public guest preview — no auth, no playable stream URLs */

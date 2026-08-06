@@ -139,7 +139,8 @@ function DescriptionSlot({
 export function RoomCard({ room, className }: RoomCardProps) {
   const { title, thumbnail } = getRoomPreview(room);
   const hasVideo = !!room.videoSource?.url;
-  const isLive = hasVideo && room.participantCount > 0;
+  const watching = room.liveViewers ?? room.participantCount;
+  const isLive = hasVideo && watching > 0;
   const description = room.description?.trim() || null;
   const [expanded, setExpanded] = useState(false);
 
@@ -200,7 +201,7 @@ export function RoomCard({ room, className }: RoomCardProps) {
           </div>
 
           <div className="absolute bottom-3 right-3 rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-semibold tabular-nums text-white/90 backdrop-blur-md">
-            {room.participantCount}/{room.maxUsers}
+            {watching}/{room.maxUsers}
           </div>
         </div>
 
@@ -211,7 +212,7 @@ export function RoomCard({ room, className }: RoomCardProps) {
           <p className="h-4 truncate text-xs text-white/45">
             {room.owner.displayName}
             <span className="mx-1.5 text-white/20">·</span>
-            {room.participantCount} watching
+            {watching} watching
           </p>
 
           <div className="mt-auto">

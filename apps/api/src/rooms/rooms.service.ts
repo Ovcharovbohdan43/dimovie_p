@@ -20,6 +20,7 @@ import {
   getVideoPreview,
   getPlanCapabilities,
   ROOM_CODE_LENGTH,
+  rankDiscoverRooms,
 } from '@dimovie/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
@@ -173,11 +174,45 @@ export class RoomsService {
     const rooms = await this.prisma.room.findMany({
       where: { privacy: 'PUBLIC', status: 'ACTIVE' },
       include: this.roomInclude(),
-      orderBy: { createdAt: 'desc' },
-      take: 50,
+      orderBy: { lastActivityAt: 'desc' },
+      take: 80,
     });
-    return rooms.map((r) =>
-      this.toSummary(r, r.owner.subscription ?? 'FREE'),
+
+    const liveCounts = await Promise.all(
+      rooms.map(async (room) => {
+        try {
+          const n = await this.redis.client.hlen(
+            `room:${room.roomCode}:presence`,
+          );
+          return n;
+        } catch {
+          return 0;
+        }
+      }),
+    );
+
+    const candidates = rooms.map((room, i) => ({
+      id: room.id,
+      roomCode: room.roomCode,
+      ownerId: room.ownerId,
+      participantCount: room.participants.length,
+      liveViewers: liveCounts[i] ?? 0,
+      hasVideo: !!room.videoSource?.url,
+      createdAtMs: room.createdAt.getTime(),
+      lastActivityAtMs: room.lastActivityAt.getTime(),
+      room,
+    }));
+
+    const ranked = rankDiscoverRooms(candidates, 48);
+    return ranked.map((item) =>
+      this.toSummary(
+        item.room,
+        item.room.owner.subscription ?? 'FREE',
+        {
+          liveViewers: item.liveViewers,
+          discoverScore: Math.round(item.discoverScore * 100) / 100,
+        },
+      ),
     );
   }
 
@@ -470,6 +505,7 @@ export class RoomsService {
       rules?: string | null;
       branding?: unknown;
       createdAt: Date;
+      lastActivityAt?: Date;
       owner: {
         id: string;
         displayName: string;
@@ -483,6 +519,7 @@ export class RoomsService {
       participants: { id: string }[];
     },
     ownerTier: 'FREE' | 'PRO' | 'ENTERPRISE' = room.owner.subscription ?? 'FREE',
+    extras?: { liveViewers?: number; discoverScore?: number },
   ): RoomSummary {
     const planFeatures = getPlanCapabilities(ownerTier);
     const branding = planFeatures.customBranding
@@ -496,6 +533,8 @@ export class RoomsService {
       status: room.status,
       maxUsers: room.maxUsers,
       participantCount: room.participants.length,
+      liveViewers: extras?.liveViewers,
+      discoverScore: extras?.discoverScore,
       description: room.description ?? undefined,
       rules: room.rules ?? undefined,
       owner: { id: room.owner.id, displayName: room.owner.displayName },
@@ -511,6 +550,7 @@ export class RoomsService {
       planFeatures,
       branding,
       createdAt: room.createdAt.toISOString(),
+      lastActivityAt: room.lastActivityAt?.toISOString(),
     };
   }
 }

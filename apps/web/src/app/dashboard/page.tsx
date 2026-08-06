@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import type { RoomSummary, WatchHistoryItem } from "@dimovie/shared";
 import { getPlanCapabilities } from "@dimovie/shared";
-import { api } from "@/lib/api";
+import { api, publicApi } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { ContentRow } from "@/components/home/content-row";
 import { RoomCard } from "@/components/home/room-card";
@@ -55,7 +55,19 @@ function DashboardContent() {
     enabled: !!me.data,
   });
 
+  const publicRooms = useQuery({
+    queryKey: ["rooms", "public"],
+    queryFn: () => publicApi<RoomSummary[]>("/rooms/public"),
+    enabled: !!me.data,
+    refetchInterval: 20000,
+  });
+
   const planCaps = me.data ? getPlanCapabilities(me.data.subscription) : null;
+  const mineEmpty = !rooms.isLoading && (rooms.data?.length ?? 0) === 0;
+  const discover = publicRooms.data ?? [];
+  // Hide rooms the user already owns from the social discover rails
+  const mineIds = new Set(rooms.data?.map((r) => r.id) ?? []);
+  const discoverOthers = discover.filter((r) => !mineIds.has(r.id));
 
   const history = useQuery({
     queryKey: ["history"],
@@ -252,29 +264,51 @@ function DashboardContent() {
         </motion.div>
 
         <div className="space-y-12">
-          <ContentRow title="Active watch parties">
-            {rooms.isLoading ? (
-              <>
-                <Skeleton className="aspect-video h-auto w-[72vw] max-w-[300px] flex-shrink-0 snap-start rounded-none sm:w-[260px]" />
-                <Skeleton className="aspect-video h-auto w-[72vw] max-w-[300px] flex-shrink-0 snap-start rounded-none sm:w-[260px]" />
-              </>
-            ) : rooms.data?.length ? (
-              rooms.data.map((room) => <RoomCard key={room.id} room={room} />)
-            ) : (
-              <div className="flex w-full max-w-md flex-col gap-3 py-6">
-                <p className="text-sm text-white/45">
-                  No active rooms yet — open the night with one tap.
-                </p>
-                <Button
-                  className="h-10 w-fit bg-white px-4 font-semibold text-black hover:bg-white/90"
-                  onClick={() => setOpen(true)}
-                >
-                  <PlayMark className="mr-2 size-3.5" />
-                  Start a party
-                </Button>
-              </div>
-            )}
-          </ContentRow>
+          {!mineEmpty && (
+            <ContentRow title="Active watch parties">
+              {rooms.isLoading ? (
+                <>
+                  <Skeleton className="aspect-video h-auto w-[72vw] max-w-[300px] flex-shrink-0 snap-start rounded-none sm:w-[260px]" />
+                  <Skeleton className="aspect-video h-auto w-[72vw] max-w-[300px] flex-shrink-0 snap-start rounded-none sm:w-[260px]" />
+                </>
+              ) : (
+                rooms.data!.map((room) => (
+                  <RoomCard key={room.id} room={room} />
+                ))
+              )}
+            </ContentRow>
+          )}
+
+          {(mineEmpty || discoverOthers.length > 0) && (
+            <ContentRow
+              title={mineEmpty ? "Join a public party" : "Discover public parties"}
+            >
+              {publicRooms.isLoading || rooms.isLoading ? (
+                <>
+                  <Skeleton className="aspect-video h-auto w-[72vw] max-w-[300px] flex-shrink-0 snap-start rounded-none sm:w-[260px]" />
+                  <Skeleton className="aspect-video h-auto w-[72vw] max-w-[300px] flex-shrink-0 snap-start rounded-none sm:w-[260px]" />
+                  <Skeleton className="aspect-video h-auto w-[72vw] max-w-[300px] flex-shrink-0 snap-start rounded-none sm:w-[260px]" />
+                </>
+              ) : discoverOthers.length ? (
+                discoverOthers.map((room) => (
+                  <RoomCard key={`pub-${room.id}`} room={room} />
+                ))
+              ) : (
+                <div className="flex w-full max-w-md flex-col gap-3 py-6">
+                  <p className="text-sm text-white/45">
+                    No public parties yet — open the night with one tap.
+                  </p>
+                  <Button
+                    className="h-10 w-fit bg-white px-4 font-semibold text-black hover:bg-white/90"
+                    onClick={() => setOpen(true)}
+                  >
+                    <PlayMark className="mr-2 size-3.5" />
+                    Start a party
+                  </Button>
+                </div>
+              )}
+            </ContentRow>
+          )}
 
           {!(planCaps?.watchHistory ?? false) ? (
             <ContentRow title="Continue watching">
